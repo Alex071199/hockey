@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.env
+*.db
+hl_cache/
+
+# Node
+node_modules/
+.next/
+out/
+
+# Docker
+docker-compose.override.yml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Build artifacts (TypeScript)
+*.tsbuildinfo
+
+# Debug scripts
+debug_*.py
+debug_*.html
+
+# Generated/downloaded data
+/standings.json
+/teams_check.txt
+/liga/
+/logos/
+/mainlogo.png
