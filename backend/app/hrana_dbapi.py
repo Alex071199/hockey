@@ -77,14 +77,16 @@ def _decode_value(cell):
 
 def _encode_value(v):
     if v is None:
-        return None
+        return {"type": "null"}
     if isinstance(v, bool):
-        return 1 if v else 0
-    if isinstance(v, (int, float, str)):
-        return v
+        return {"type": "integer", "value": "1" if v else "0"}
+    if isinstance(v, int):
+        return {"type": "integer", "value": str(v)}
+    if isinstance(v, float):
+        return {"type": "float", "value": repr(v)}
     if isinstance(v, (bytes, bytearray)):
-        return bytes(v)
-    return str(v)
+        return {"type": "blob", "value": base64.b64encode(bytes(v)).decode("ascii")}
+    return {"type": "text", "value": str(v)}
 
 
 class Connection:
