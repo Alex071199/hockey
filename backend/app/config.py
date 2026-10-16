@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     TELEGRAM_ADMIN_CHAT_ID: str = ""
     YOOMONEY_SECRET: str = ""
     YOOMONEY_WALLET: str = ""
+    # Cloudflare Worker прокси (EU-регион) для обхода geo-блока 1win player
+    PROXY_URL: str = ""
 
     model_config = {"env_file": ".env"}
 
@@ -51,6 +53,7 @@ def _squash_ws(value: str) -> str:
 
 settings.TURSO_AUTH_TOKEN = _squash_ws(settings.TURSO_AUTH_TOKEN)
 settings.TURSO_DATABASE_URL = _squash_ws(settings.TURSO_DATABASE_URL)
+settings.PROXY_URL = (settings.PROXY_URL or "").strip()
 
 
 def _resolve_database_url() -> str:

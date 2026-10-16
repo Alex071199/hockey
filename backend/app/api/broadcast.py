@@ -22,6 +22,7 @@ import websockets
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 
+from app.config import settings
 from app.scraper.team_names import canonical_team_name
 
 router = APIRouter(prefix="/api/broadcast", tags=["broadcast"])
@@ -132,18 +133,25 @@ async def _fetch_player_source(broadcast_url: str) -> tuple[str | None, str | No
 
     Большинство трансляций отдаёт прямой m3u8 (только при Referer из белого
     списка 1win); часть — iframe внутри себя (Twitch и другие плееры).
+    Если задан PROXY_URL — запрос идёт через Cloudflare Worker (EU),
+    иначе US IP получает заглушку с таймером вместо плеера.
     """
-    headers = {
-        "User-Agent": WIN_UA,
-        "Referer": WIN_ORIGIN + "/",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Sec-Fetch-Dest": "iframe",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "cross-site",
-        "Upgrade-Insecure-Requests": "1",
-    }
     try:
-        r = await _shared_client().get(broadcast_url, headers=headers)
+        proxied = _proxy_target(broadcast_url)
+        if proxied:
+            # РФ-прокси (хостинг): сам ставит заголовки и ходит с РФ IP
+            r = await _shared_client().get(proxied, headers=_PROXY_REQ_HEADERS)
+        else:
+            headers = {
+                "User-Agent": WIN_UA,
+                "Referer": WIN_ORIGIN + "/",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Sec-Fetch-Dest": "iframe",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "cross-site",
+                "Upgrade-Insecure-Requests": "1",
+            }
+            r = await _shared_client().get(broadcast_url, headers=headers)
     except Exception:
         return None, None, 0, 0, ""
     text = r.text
@@ -195,9 +203,13 @@ async def _get_state(win_id: int, force: bool = False) -> dict | None:
 
 
 async def _upstream_get(url: str) -> tuple[bytes, int]:
-    headers = {"User-Agent": WIN_UA, "Accept": "*/*", "Referer": WIN_ORIGIN + "/"}
     try:
-        r = await _shared_client().get(url, headers=headers)
+        proxied = _proxy_target(url)
+        if proxied:
+            r = await _shared_client().get(proxied, headers=_PROXY_REQ_HEADERS)
+        else:
+            headers = {"User-Agent": WIN_UA, "Accept": "*/*", "Referer": WIN_ORIGIN + "/"}
+            r = await _shared_client().get(url, headers=headers)
         return r.content, r.status_code
     except Exception:
         return b"", 0
@@ -217,6 +229,25 @@ def _rekey(url: str, fresh_m3u8: str) -> str:
 
 def _absolutize(ref: str, base_url: str) -> str:
     return urllib.parse.urljoin(base_url, ref)
+
+
+def _proxy_target(url: str) -> str | None:
+    """URL запроса через РФ-прокси (PROXY_URL), либо None — напрямую.
+
+    В PROXY_URL может быть query (токен), поэтому разделитель ? или &.
+    """
+    if not settings.PROXY_URL:
+        return None
+    sep = "&" if "?" in settings.PROXY_URL else "?"
+    return f"{settings.PROXY_URL}{sep}url={urllib.parse.quote(url, safe='')}"
+
+
+# Заголовки запроса К прокси-хостингу: его nginx режет не-браузерные
+# User-Agent, а сами заголовки прокси пробрасывает к 1win уже сам.
+_PROXY_REQ_HEADERS = {
+    "User-Agent": WIN_UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+}
 
 
 def _rewrite_playlist(text: str, base_url: str, win_id: int) -> str:
