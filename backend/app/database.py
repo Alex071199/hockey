@@ -5,18 +5,19 @@ from sqlalchemy.orm import declarative_base
 
 from app.config import settings
 
+from sqlalchemy.dialects import registry as _dialect_registry
+
+_dialect_registry.register("sqlite.hrana", "app.sqlite_hrana", "SQLiteDialect_hrana")
+
 
 def _create_engine():
     url = settings.DATABASE_URL
-    kwargs: dict = {}
-    if url.startswith("sqlite+aiolibsql://"):
-        from sqlalchemy.pool import AsyncAdaptedQueuePool
-
-        kwargs["poolclass"] = AsyncAdaptedQueuePool
-        if settings.TURSO_AUTH_TOKEN:
-            kwargs["connect_args"] = {"auth_token": settings.TURSO_AUTH_TOKEN}
-    else:
-        kwargs["connect_args"] = {}
+    kwargs: dict = {"connect_args": {}}
+    if url.startswith("sqlite+hrana://"):
+        kwargs["connect_args"] = {
+            "auth_token": settings.TURSO_AUTH_TOKEN,
+            "secure": True,
+        }
     return create_async_engine(url, echo=False, **kwargs)
 
 

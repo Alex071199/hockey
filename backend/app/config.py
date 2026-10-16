@@ -56,7 +56,7 @@ def _resolve_database_url() -> str:
             if host.startswith(prefix):
                 host = host[len(prefix):]
         host = host.rstrip("/")
-        return f"sqlite+aiolibsql://{host}?secure=true"
+        return f"sqlite+hrana://{host}"
     return "sqlite+aiosqlite:///./hockey.db"
 
 
