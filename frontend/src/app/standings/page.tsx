@@ -186,14 +186,7 @@ export default function StandingsPage() {
         </h1>
         {data && (
           <span className="text-xs opacity-60">
-            КХЛ · сезон {data.season}/{String((data.season + 1) % 100).padStart(2, "0")} · обновлено{" "}
-            {new Date(data.updated_at).toLocaleString("ru-RU", {
-              day: "numeric",
-              month: "short",
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
-            {data.stale ? " · данные устарели" : ""}
+            КХЛ · сезон {data.season}/{String((data.season + 1) % 100).padStart(2, "0")}
           </span>
         )}
       </div>

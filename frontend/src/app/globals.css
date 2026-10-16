@@ -84,6 +84,15 @@ body {
   animation: glow-red 2s ease-in-out infinite;
 }
 
+@keyframes glow-fav {
+  0%, 100% { box-shadow: 0 0 18px rgba(225, 29, 72, 0.35), inset 0 0 24px rgba(225, 29, 72, 0.08); }
+  50% { box-shadow: 0 0 34px rgba(225, 29, 72, 0.6), inset 0 0 30px rgba(225, 29, 72, 0.16); }
+}
+
+.animate-glow-fav {
+  animation: glow-fav 2s ease-in-out infinite;
+}
+
 @keyframes arena-light {
   0%, 100% { opacity: 0.03; }
   50% { opacity: 0.08; }
@@ -184,4 +193,18 @@ body {
   border-radius: inherit;
   border: 1px solid linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.02));
   pointer-events: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+@supports (padding: env(safe-area-inset-top)) {
+  .match-player-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
 }

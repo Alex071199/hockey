@@ -1,0 +1,8 @@
+{
+  "name": "scrap-livetv-tools",
+  "private": true,
+  "description": "Local tooling (Railway IaC SDK)",
+  "dependencies": {
+    "railway": "^3.13.0"
+  }
+}

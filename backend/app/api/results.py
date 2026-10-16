@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app import highlightly
+from app import khl_api
 
 router = APIRouter(prefix="/api", tags=["results"])
 
@@ -26,11 +26,7 @@ async def get_results(
 ):
     date_str = _validate_date(date) if date else _default_date()
     try:
-        return await highlightly.get_results(league, date_str)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        return await khl_api.get_results(date_str)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Results upstream error: {e}")
 
@@ -42,13 +38,11 @@ async def refresh_results(
 ):
     date_str = _validate_date(date) if date else _default_date()
     try:
-        return await highlightly.refresh_results(league, date_str)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        from app.khl_api import _cache
+        _cache.pop(f"events_{date_str}", None)
+        return await khl_api.get_results(date_str)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Results upstream error: {e}")
+        raise HTTPException(status_code=502, detail=f"Results refresh error: {e}")
 
 
 @router.get("/match-stats")
@@ -57,17 +51,20 @@ async def get_match_stats(
     date: str | None = Query(default=None),
     home: str = Query(default=""),
     away: str = Query(default=""),
+    event_id: int | None = Query(default=None),
+    live: bool = Query(default=False),
 ):
+    if event_id:
+        try:
+            return await khl_api.get_match_stats_by_id(event_id, live=live)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Match stats error: {e}")
     if not home or not away:
-        raise HTTPException(status_code=400, detail="home and away query params are required")
+        raise HTTPException(status_code=400, detail="home and away query params are required (or event_id)")
     date_str = _validate_date(date) if date else _default_date()
     try:
-        return await highlightly.get_match_stats(league, date_str, home, away)
+        return await khl_api.get_match_stats(home, away, date_str, live=live)
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Match stats upstream error: {e}")

@@ -1,51 +1,80 @@
 "use client";
 
-interface FormEntry {
-  id: number;
-  date: string;
-  home: string;
-  away: string;
-  score_home: number | null;
-  score_away: number | null;
-  finish: "reg" | "ot" | "so";
-}
-
-interface SeasonEntry {
-  leagueName: string;
-  season: number;
-  total: { games: { played: number; wins: number; loses: number }; goals: { scored: number; received: number } };
-  home: { games: { played: number; wins: number; loses: number }; goals: { scored: number; received: number } };
-  away: { games: { played: number; wins: number; loses: number }; goals: { scored: number; received: number } };
-}
-
-interface Prediction {
-  modelType: string;
-  description: string;
-  probabilities: Record<string, string>;
-}
+import { useState } from "react";
+import HlsVideo from "@/components/HlsVideo";
 
 export interface MatchStatsData {
   league: string;
-  partial?: string[];
+  event_id: number;
   match: {
     home: string;
     away: string;
+    home_team_id: number;
+    away_team_id: number;
     status: string;
     score_home: number;
     score_away: number;
     finish: "reg" | "ot" | "so";
   };
   periods: Record<string, string | null>;
-  venue: { city?: string; name?: string; capacity?: string } | null;
-  predictions: Prediction[];
-  form: { home: FormEntry[]; away: FormEntry[] };
-  h2h: FormEntry[];
-  season_stats: { home: SeasonEntry[]; away: SeasonEntry[] };
+  team_stats: {
+    home: TeamStats;
+    away: TeamStats;
+  };
+  goals: GoalEntry[];
+  penalties: PenaltyEntry[];
+  rosters?: {
+    home: RosterPlayer[];
+    away: RosterPlayer[];
+  };
+  highlight?: {
+    m3u8_url: string;
+    name?: string;
+  } | null;
+}
+
+interface RosterPlayer {
+  number: number | null;
+  name: string;
+  role: string;
+  image?: string | null;
+  goals?: number;
+}
+
+interface TeamStats {
+  shots: number;
+  goals_for: number;
+  ppg: number;
+  shg: number;
+  ppc: number;
+  faceoffs_won: number;
+  pim: number;
+  puck_control_pct: number;
+  distance_km: number;
+  zone_entries: number;
+}
+
+interface GoalEntry {
+  time: string;
+  score: string;
+  period: number;
+  team_id: number;
+  scorer: string;
+  assistants: string[];
+}
+
+interface PenaltyEntry {
+  time: string;
+  period: number;
+  reason: string;
+  minutes: number;
+  player: string;
+  team_id: number;
 }
 
 function parsePair(s: string | null): [number, number] | null {
   if (!s) return null;
-  const parts = s.split("-");
+  const parts = s.split(":");
   if (parts.length !== 2) return null;
   const a = parseInt(parts[0].trim(), 10);
   const b = parseInt(parts[1].trim(), 10);
@@ -59,11 +88,30 @@ function shortDate(iso: string): string {
   return d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
 }
 
-function resultOf(e: FormEntry, team: string): "W" | "L" | "?" {
-  if (e.score_home === null || e.score_away === null) return "?";
-  const mine = team === e.home ? e.score_home : e.score_away;
-  const theirs = team === e.home ? e.score_away : e.score_home;
-  return mine > theirs ? "W" : "L";
+function StatBar({ home, away, label }: { home: number; away: number; label: string }) {
+  const total = home + away;
+  const isZero = total === 0;
+  const homePct = total > 0 ? (home / total) * 100 : 50;
+  const barStyle: React.CSSProperties = isZero
+    ? { height: "8px", borderRadius: "9999px", border: "1px solid rgba(255,255,255,0.15)" }
+    : { position: "relative", height: "8px", borderRadius: "9999px", background: "rgba(255,255,255,0.05)", overflow: "hidden" };
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-xs">
+        <span className="font-bold tabular-nums">{home}</span>
+        <span className="text-hockey-text-muted">{label}</span>
+        <span className="font-bold tabular-nums">{away}</span>
+      </div>
+      <div style={barStyle}>
+        {!isZero && (
+          <>
+            <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: `${homePct}%`, borderRadius: "9999px 0 0 9999px", background: "#e11d48" }} />
+            <div style={{ position: "absolute", top: 0, bottom: 0, right: 0, width: `${100 - homePct}%`, borderRadius: "0 9999px 9999px 0", background: "#ffffff" }} />
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function PeriodChart({ periods, home, away }: { periods: Record<string, string | null>; home: string; away: string }) {
@@ -80,26 +128,33 @@ function PeriodChart({ periods, home, away }: { periods: Record<string, string |
   }
   const pen = parsePair(periods["penalties"]);
   if (!rows.length && !pen) return null;
-  const max = Math.max(1, ...rows.flatMap((r) => r.pair));
   return (
     <div className="space-y-2.5">
-      {rows.map((r) => (
-        <div key={r.label}>
-          <div className="flex justify-between text-xs mb-1">
-            <span className="font-bold tabular-nums">{r.pair[0]}</span>
-            <span className="opacity-60">{r.label}</span>
-            <span className="font-bold tabular-nums">{r.pair[1]}</span>
-          </div>
-          <div className="flex gap-1 h-2">
-            <div className="flex-1 flex justify-end bg-white/5 rounded-full overflow-hidden">
-              <div className="bg-hockey-accent rounded-full" style={{ width: `${(r.pair[0] / max) * 100}%` }} />
+      {rows.map((r) => {
+        const total = r.pair[0] + r.pair[1];
+        const isZero = total === 0;
+        const homePct = total > 0 ? (r.pair[0] / total) * 100 : 0;
+        const barStyle: React.CSSProperties = isZero
+          ? { height: "8px", borderRadius: "9999px", border: "1px solid rgba(255,255,255,0.15)" }
+          : { position: "relative", height: "8px", borderRadius: "9999px", background: "rgba(255,255,255,0.05)", overflow: "hidden" };
+        return (
+          <div key={r.label}>
+            <div className="flex justify-between text-xs mb-1">
+              <span className="font-bold tabular-nums">{r.pair[0]}</span>
+              <span className="opacity-60">{r.label}</span>
+              <span className="font-bold tabular-nums">{r.pair[1]}</span>
             </div>
-            <div className="flex-1 bg-white/5 rounded-full overflow-hidden">
-              <div className="bg-sky-400/80 rounded-full" style={{ width: `${(r.pair[1] / max) * 100}%` }} />
+            <div style={barStyle}>
+              {!isZero && (
+                <>
+                  <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: `${homePct}%`, borderRadius: "9999px 0 0 9999px", background: "#e11d48" }} />
+                  <div style={{ position: "absolute", top: 0, bottom: 0, right: 0, width: `${100 - homePct}%`, borderRadius: "0 9999px 9999px 0", background: "#ffffff" }} />
+                </>
+              )}
             </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
       {pen && (
         <div className="flex justify-between text-xs pt-1">
           <span className="font-bold tabular-nums">{pen[0]}</span>
@@ -115,72 +170,186 @@ function PeriodChart({ periods, home, away }: { periods: Record<string, string |
   );
 }
 
-function FormBadges({ entries, team }: { entries: FormEntry[]; team: string }) {
-  if (!entries.length) return <p className="text-xs opacity-60">Нет данных</p>;
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {entries.map((e) => {
-        const r = resultOf(e, team);
-        const extra = e.finish === "ot" ? "ОТ" : e.finish === "so" ? "Б" : "";
+function GoalScorers({ goals, homeTeamId, awayTeamId, homeName, awayName }: { goals: GoalEntry[]; homeTeamId: number; awayTeamId: number; homeName: string; awayName: string }) {
+  if (!goals.length) return null;
+    return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-3 text-[10px] text-hockey-text-muted mb-1">
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full inline-block" style={{ background: "#e11d48" }} /> {homeName}</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full inline-block" style={{ background: "#ffffff" }} /> {awayName}</span>
+      </div>
+      {goals.map((g, i) => {
+        const isHome = g.team_id === homeTeamId;
         return (
-          <span
-            key={e.id}
-            title={`${e.home} ${e.score_home}:${e.score_away} ${e.away} · ${shortDate(e.date)}`}
-            className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold tabular-nums ${
-              r === "W" ? "bg-emerald-500/15 text-emerald-300" : "bg-[#791529]/25 text-red-300"
-            }`}
-          >
-            {r === "W" ? "В" : "П"} {e.score_home}:{e.score_away}
-            {extra && <span className="opacity-70 font-semibold">{extra}</span>}
-          </span>
+          <div key={i} className="flex items-center gap-2 text-xs">
+            <span className="text-hockey-text-muted tabular-nums w-12 text-right flex-shrink-0">{g.time}</span>
+            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: isHome ? "#e11d48" : "#ffffff" }} />
+            <span className="font-bold">{g.scorer}</span>
+            {g.assistants.length > 0 && (
+              <span className="text-hockey-text-muted">({g.assistants.join(", ")})</span>
+            )}
+            <span className="ml-auto font-bold tabular-nums">{g.score}</span>
+          </div>
         );
       })}
     </div>
   );
 }
 
-function SeasonBlock({ entries, label }: { entries: SeasonEntry[]; label: string }) {
-  const s = entries.find((e) => e.leagueName === "KHL") ?? entries[0];
-  if (!s) return <p className="text-xs opacity-60">Нет данных</p>;
-  const t = s.total;
+function PenaltiesList({ penalties, homeTeamId, homeName, awayName }: { penalties: PenaltyEntry[]; homeTeamId: number; homeName: string; awayName: string }) {
+  if (!penalties.length) return null;
   return (
-    <div className="text-sm">
-      <p className="text-xs opacity-60 mb-2">
-        {label} · сезон {s.season}/{String((s.season + 1) % 100).padStart(2, "0")}
-      </p>
-      <div className="grid grid-cols-4 gap-2 text-center">
-        {[
-          ["И", t.games.played],
-          ["В", t.games.wins],
-          ["П", t.games.loses],
-          ["Ш", `${t.goals.scored}–${t.goals.received}`],
-        ].map(([k, v]) => (
-          <div key={k} className="bg-white/5 rounded-xl py-2">
-            <div className="text-[10px] opacity-60 uppercase">{k}</div>
-            <div className="font-extrabold tabular-nums">{v}</div>
-          </div>
-        ))}
-      </div>
+    <div className="space-y-1.5">
+      {penalties.map((p, i) => (
+        <div key={i} className="flex items-center gap-2 text-xs">
+          <span className="text-hockey-text-muted tabular-nums w-12 text-right flex-shrink-0">{p.time}</span>
+          <span className="text-yellow-400 font-bold tabular-nums w-6 text-center flex-shrink-0">{p.minutes}&#x2019;</span>
+          <span className="font-bold truncate">{p.player}</span>
+          <span className="text-hockey-text-muted truncate">({p.team_id === homeTeamId ? homeName : awayName})</span>
+          <span className="text-hockey-text-muted truncate hidden sm:inline">{p.reason}</span>
+        </div>
+      ))}
     </div>
   );
 }
 
-export default function MatchStats({ data }: { data: MatchStatsData }) {
+const ROLE_ORDER: Record<string, number> = { goaltender: 0, defensemen: 1, forward: 2 };
+const ROLE_LABELS: Record<string, string> = {
+  goaltender: "Вратари",
+  defensemen: "Защитники",
+  forward: "Нападающие",
+};
+
+function RosterList({ players, accent }: { players: RosterPlayer[]; accent: string }) {
+  const byRole = new Map<string, RosterPlayer[]>();
+  for (const p of players) {
+    const key = p.role || "other";
+    if (!byRole.has(key)) byRole.set(key, []);
+    byRole.get(key)!.push(p);
+  }
+  const roles = Array.from(byRole.keys()).sort(
+    (a, b) => (ROLE_ORDER[a] ?? 9) - (ROLE_ORDER[b] ?? 9)
+  );
+
+  return (
+    <div className="space-y-4">
+      {roles.map((role) => {
+        const items = byRole
+          .get(role)!
+          .slice()
+          .sort((a, b) => (a.number ?? 999) - (b.number ?? 999));
+        return (
+          <div key={role}>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: accent }} />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-hockey-text-muted">
+                {ROLE_LABELS[role] ?? "Состав"}
+              </span>
+            </div>
+            <div className="space-y-1">
+              {items.map((p, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs">
+                  <span className="w-6 text-right font-black tabular-nums text-hockey-text-muted shrink-0">
+                    {p.number ?? "—"}
+                  </span>
+                  {p.image ? (
+                    <img
+                      src={p.image}
+                      alt=""
+                      loading="lazy"
+                      className="w-6 h-6 rounded-full object-cover bg-white/10 shrink-0"
+                    />
+                  ) : (
+                    <span className="w-6 h-6 rounded-full bg-white/10 shrink-0" />
+                  )}
+                  <span className="font-bold truncate">{p.name}</span>
+                  {(p.goals ?? 0) > 0 && (
+                    <span className="ml-auto text-[10px] font-black px-1.5 py-0.5 rounded bg-hockey-accent/20 text-hockey-accent tabular-nums shrink-0">
+                      {p.goals} Г
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export default function MatchStats({ data, tabs = false }: { data: MatchStatsData; tabs?: boolean }) {
+  const [tab, setTab] = useState<"stats" | "rosters">("stats");
   const m = data.match;
-  const pred = data.predictions.find((p) => p.modelType === "three-way") ?? data.predictions[0];
-  const probs = pred ? Object.entries(pred.probabilities) : [];
-  const maxProb = Math.max(1, ...probs.map(([, v]) => parseFloat(v) || 0));
+  const hs = data.team_stats.home;
+  const as_ = data.team_stats.away;
+
+  const faceoffsHome = hs.faceoffs_won;
+  const faceoffsAway = as_.faceoffs_won;
+  const totalFaceoffs = faceoffsHome + faceoffsAway;
+  const faceoffHomePct = totalFaceoffs > 0 ? Math.round((faceoffsHome / totalFaceoffs) * 100) : 50;
+  const faceoffAwayPct = 100 - faceoffHomePct;
+
+  const hasRosters = !!(
+    data.rosters && (data.rosters.home.length > 0 || data.rosters.away.length > 0)
+  );
+  const showTabs = tabs && hasRosters;
+
+  const statsSections = (
+    <>
+      <section className="glass rounded-2xl p-4 sm:p-6">
+        <h3 className="text-sm font-extrabold uppercase tracking-wide mb-4">Статистика матча</h3>
+        <div className="space-y-3">
+          <StatBar home={hs.shots} away={as_.shots} label="Броски" />
+          <StatBar home={faceoffsHome} away={faceoffsAway} label={`Вбрасывания (${faceoffHomePct}% / ${faceoffAwayPct}%)`} />
+          <StatBar home={hs.ppg} away={as_.ppg} label="Голы в большинстве" />
+          <StatBar home={hs.shg} away={as_.shg} label="Голы в меньшинстве" />
+          <StatBar home={hs.pim} away={as_.pim} label="Минуты штрафа" />
+        </div>
+      </section>
+
+      {data.goals.length > 0 && (
+        <section className="glass rounded-2xl p-4 sm:p-6">
+          <h3 className="text-sm font-extrabold uppercase tracking-wide mb-3">Голы</h3>
+          <GoalScorers goals={data.goals} homeTeamId={m.home_team_id} awayTeamId={m.away_team_id} homeName={m.home} awayName={m.away} />
+        </section>
+      )}
+
+      {data.penalties.length > 0 && (
+        <section className="glass rounded-2xl p-4 sm:p-6">
+          <h3 className="text-sm font-extrabold uppercase tracking-wide mb-3">Штрафы</h3>
+          <PenaltiesList penalties={data.penalties} homeTeamId={m.home_team_id} homeName={m.home} awayName={m.away} />
+        </section>
+      )}
+    </>
+  );
+
+  const rostersSection = hasRosters && (
+    <section className="glass rounded-2xl p-4 sm:p-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="w-2 h-2 rounded-full" style={{ background: "#e11d48" }} />
+            <p className="text-xs font-extrabold uppercase tracking-wide truncate">{m.home}</p>
+          </div>
+          <RosterList players={data.rosters!.home} accent="#e11d48" />
+        </div>
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="w-2 h-2 rounded-full" style={{ background: "#ffffff" }} />
+            <p className="text-xs font-extrabold uppercase tracking-wide truncate">{m.away}</p>
+          </div>
+          <RosterList players={data.rosters!.away} accent="#ffffff" />
+        </div>
+      </div>
+    </section>
+  );
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      {data.partial && data.partial.length > 0 && (
-        <p className="text-xs opacity-60 text-center">
-          Часть разделов временно недоступна (лимит API), остальное ниже
-        </p>
-      )}
       <section className="glass rounded-2xl p-4 sm:p-6">
         <div className="flex items-center justify-center gap-3 sm:gap-5 mb-5">
-          <p className="flex-1 text-base sm:text-xl font-extrabold text-right">{m.home}</p>
+          <p className={`flex-1 font-extrabold text-right ${m.home.length > 12 ? 'text-sm sm:text-lg' : 'text-base sm:text-xl'}`}>{m.home}</p>
           <div className="text-center leading-none">
             <div className="text-3xl sm:text-4xl font-black tabular-nums whitespace-nowrap">
               {m.score_home} : {m.score_away}
@@ -188,77 +357,49 @@ export default function MatchStats({ data }: { data: MatchStatsData }) {
             {m.finish === "ot" && <div className="text-xs font-bold opacity-60 mt-1">ОТ</div>}
             {m.finish === "so" && <div className="text-xs font-bold opacity-60 mt-1">Б</div>}
           </div>
-          <p className="flex-1 text-base sm:text-xl font-extrabold text-left">{m.away}</p>
+          <p className={`flex-1 font-extrabold text-left ${m.away.length > 12 ? 'text-sm sm:text-lg' : 'text-base sm:text-xl'}`}>{m.away}</p>
         </div>
         <PeriodChart periods={data.periods} home={m.home} away={m.away} />
-        {data.venue?.name && (
-          <p className="text-xs opacity-60 mt-4 text-center">
-            {data.venue.name}
-            {data.venue.city ? ` · ${data.venue.city}` : ""}
-            {data.venue.capacity ? ` · ${data.venue.capacity} мест` : ""}
-          </p>
-        )}
       </section>
 
-      {pred && (
-        <section className="glass rounded-2xl p-4 sm:p-6">
-          <h3 className="text-sm font-extrabold uppercase tracking-wide mb-1">Прогноз</h3>
-          <p className="text-xs opacity-70 mb-3">{pred.description}</p>
-          <div className="space-y-2">
-            {probs.map(([k, v]) => (
-              <div key={k}>
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="uppercase opacity-70">{k === "home" ? m.home : k === "away" ? m.away : "Ничья"}</span>
-                  <span className="font-bold tabular-nums">{v}</span>
-                </div>
-                <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-                  <div className="h-full bg-hockey-accent rounded-full" style={{ width: `${(parseFloat(v) / maxProb) * 100}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
+      {data.highlight?.m3u8_url && (
+        <section>
+          <h3 className="text-sm font-extrabold uppercase tracking-wide mb-3">Обзор матча</h3>
+          <HlsVideo
+            compact
+            retry={3}
+            url={data.highlight.m3u8_url}
+            title={data.highlight.name || "Обзор матча"}
+          />
         </section>
       )}
 
-      <section className="glass rounded-2xl p-4 sm:p-6">
-        <h3 className="text-sm font-extrabold uppercase tracking-wide mb-3">Форма · последние 5</h3>
-        <div className="grid sm:grid-cols-2 gap-4">
-          <div>
-            <p className="text-xs font-bold mb-2">{m.home}</p>
-            <FormBadges entries={data.form.home} team={m.home} />
-          </div>
-          <div>
-            <p className="text-xs font-bold mb-2">{m.away}</p>
-            <FormBadges entries={data.form.away} team={m.away} />
-          </div>
-        </div>
-      </section>
-
-      <section className="glass rounded-2xl p-4 sm:p-6">
-        <h3 className="text-sm font-extrabold uppercase tracking-wide mb-3">Очные встречи</h3>
-        {data.h2h.length === 0 && <p className="text-xs opacity-60">Нет данных</p>}
-        <div className="space-y-1.5">
-          {data.h2h.slice(0, 10).map((e) => (
-            <div key={e.id} className="flex items-center justify-between text-xs sm:text-sm gap-2">
-              <span className="opacity-60 tabular-nums flex-shrink-0">{shortDate(e.date)}</span>
-              <span className="truncate">
-                {e.home} – {e.away}
-              </span>
-              <span className="font-extrabold tabular-nums flex-shrink-0">
-                {e.score_home}:{e.score_away}
-              </span>
-            </div>
+      {showTabs && (
+        <div className="inline-flex gap-1 rounded-xl bg-hockey-card border border-hockey-border p-1">
+          {([["stats", "Статистика"], ["rosters", "Составы"]] as const).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={`px-4 sm:px-5 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all duration-200 ${
+                tab === key
+                  ? "bg-hockey-accent text-white shadow-lg shadow-hockey-accent/20"
+                  : "text-hockey-text-secondary hover:text-white"
+              }`}
+            >
+              {label}
+            </button>
           ))}
         </div>
-      </section>
+      )}
 
-      <section className="glass rounded-2xl p-4 sm:p-6">
-        <h3 className="text-sm font-extrabold uppercase tracking-wide mb-3">Сезон</h3>
-        <div className="grid sm:grid-cols-2 gap-4">
-          <SeasonBlock entries={data.season_stats.home} label={m.home} />
-          <SeasonBlock entries={data.season_stats.away} label={m.away} />
-        </div>
-      </section>
+      {showTabs ? (
+        tab === "stats" ? statsSections : rostersSection
+      ) : (
+        <>
+          {statsSections}
+          {rostersSection}
+        </>
+      )}
     </div>
   );
 }

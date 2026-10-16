@@ -27,7 +27,11 @@ class MatchResponse(BaseModel):
     status: str
     added_live: bool = False
     stream_urls: list[StreamUrl]
+    home_score: int | None = None
+    away_score: int | None = None
+    current_period: str | None = None
     updated_at: datetime | None = None
+    sp_match_id: int | None = None
 
     model_config = {"from_attributes": True}
 

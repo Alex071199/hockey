@@ -12,7 +12,7 @@ export default function DonatePage() {
         </p>
 
         <a
-          href="https://pay.cloudtips.ru/p/f0275311"
+          href="https://pay.cloudtips.ru/p/00cb8ffe"
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-3 btn-red px-8 py-4 rounded-xl text-base sm:text-lg font-bold transition-all duration-200 hover:scale-105"

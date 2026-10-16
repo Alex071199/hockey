@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import MatchCard from "@/components/MatchCard";
 import Link from "next/link";
-import { khlCalendar } from "@/data/khl-calendar";
+import { fetchKhlUpcoming } from "@/lib/khl-api-times";
 import { getTeamLogo } from "@/lib/team-logos";
 import { parseMatchDate } from "@/lib/parse-date";
 import MatchNotifications from "@/components/MatchNotifications";
@@ -34,18 +34,13 @@ async function getTodayMatches(): Promise<Match[]> {
   }
 }
 
-function getNextKhlMatch() {
-  const now = new Date();
-  return khlCalendar.find((m) => {
-    const [h, min] = m.time.split(":").map(Number);
-    const utcMs = Date.UTC(
-      parseInt(m.date.slice(0, 4)),
-      parseInt(m.date.slice(5, 7)) - 1,
-      parseInt(m.date.slice(8, 10)),
-      h, min, 0
-    ) - 3 * 60 * 60 * 1000;
-    return new Date(utcMs) > now;
-  }) || null;
+async function getNextKhlMatch() {
+  const list = await fetchKhlUpcoming();
+  const now = Date.now();
+  return (
+    list.find((m) => (m.start_utc ? Date.parse(m.start_utc) > now : false)) ??
+    null
+  );
 }
 
 async function HeroSection() {
@@ -54,7 +49,7 @@ async function HeroSection() {
   const liveMatch = matches
     .filter((m) => m.status === "live")
     .sort((a, b) => parseMatchDate(b.datetime_utc).getTime() - parseMatchDate(a.datetime_utc).getTime())[0];
-  const nextKhl = !liveMatch ? getNextKhlMatch() : null;
+  const nextKhl = !liveMatch ? await getNextKhlMatch() : null;
 
   return (
     <section className="relative min-h-[70vh] sm:h-[85vh] sm:min-h-[600px] flex items-start sm:items-center arena-bg overflow-hidden">
@@ -99,11 +94,11 @@ async function HeroSection() {
               <div className="glass rounded-2xl p-4 sm:p-6 max-w-md mx-auto lg:ml-auto">
                 <div className="flex items-center gap-2 mb-3 sm:mb-4">
                   <span className="w-2.5 h-2.5 rounded-full bg-hockey-live animate-pulse-live" />
-                  <span className="text-[10px] sm:text-xs font-bold text-hockey-live tracking-wider uppercase">Сейчас в эфире</span>
+                  <span className="text-[10px] sm:text-xs font-bold text-hockey-live tracking-wider uppercase whitespace-nowrap">Сейчас в эфире</span>
                 </div>
                 <div className="flex items-center justify-between gap-2 sm:gap-4 mb-3 sm:mb-4">
                   <div className="flex-1 flex items-center justify-end gap-2 sm:gap-3">
-                    <p className="text-sm sm:text-lg font-bold text-right">{liveMatch.team_home}</p>
+                    <p className={`font-bold text-right ${liveMatch.team_home === "Автомобилист" ? "text-[6.5pt] sm:text-[9.5pt]" : "text-sm sm:text-lg"}`}>{liveMatch.team_home}</p>
                     {getTeamLogo(liveMatch.team_home) && (
                       <img src={getTeamLogo(liveMatch.team_home)!} alt={liveMatch.team_home} className="w-9 h-9 sm:w-12 sm:h-12 object-contain" />
                     )}
@@ -113,14 +108,14 @@ async function HeroSection() {
                     {getTeamLogo(liveMatch.team_away) && (
                       <img src={getTeamLogo(liveMatch.team_away)!} alt={liveMatch.team_away} className="w-9 h-9 sm:w-12 sm:h-12 object-contain" />
                     )}
-                    <p className="text-sm sm:text-lg font-bold text-left">{liveMatch.team_away}</p>
+                    <p className={`font-bold text-left ${liveMatch.team_away === "Автомобилист" ? "text-[6.5pt] sm:text-[9.5pt]" : "text-sm sm:text-lg"}`}>{liveMatch.team_away}</p>
                   </div>
                 </div>
                 <div className="text-center text-xs sm:text-sm text-hockey-text-secondary mb-3 sm:mb-4">
                   {parseMatchDate(liveMatch.datetime_utc).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
                 </div>
                 <Link
-                  href={`/match/${liveMatch.id}`}
+                   href={`/${liveMatch.league.toLowerCase()}/match/${liveMatch.id}`}
                   className="block w-full btn-red py-2.5 sm:py-3 rounded-xl text-xs sm:text-sm font-bold text-center"
                 >
                   <span className="relative z-10">Смотреть</span>

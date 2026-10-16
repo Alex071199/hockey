@@ -1,8 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 
 export default function Footer() {
+  const [showEmail, setShowEmail] = useState(false);
+
   return (
     <footer className="border-t border-hockey-border bg-hockey-surface">
       <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
@@ -15,7 +18,7 @@ export default function Footer() {
               </span>
             </div>
             <p className="text-xs sm:text-sm text-hockey-text-secondary leading-relaxed">
-              Премиальная стриминговая платформа для просмотра хоккейных матчей КХЛ, ВХЛ и МХЛ в прямом эфире.
+              Стриминговая платформа для просмотра хоккейных матчей КХЛ, ВХЛ и МХЛ в прямом эфире.
             </p>
           </div>
 
@@ -25,7 +28,31 @@ export default function Footer() {
               <li><Link href="/" className="text-xs sm:text-sm text-hockey-text-muted hover:text-white transition-colors">Матчи</Link></li>
               <li><Link href="/schedule" className="text-xs sm:text-sm text-hockey-text-muted hover:text-white transition-colors">Календарь</Link></li>
               <li><Link href="/donate" className="text-xs sm:text-sm text-hockey-text-muted hover:text-white transition-colors">Поддержать</Link></li>
+              <li>
+                <button
+                  onClick={() => setShowEmail(!showEmail)}
+                  className="text-xs sm:text-sm text-hockey-text-muted hover:text-white transition-colors text-left"
+                >
+                  Реклама
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => setShowEmail(!showEmail)}
+                  className="text-xs sm:text-sm text-hockey-text-muted hover:text-white transition-colors text-left"
+                >
+                  Предложить идею
+                </button>
+              </li>
             </ul>
+            {showEmail && (
+              <div className="mt-3 p-3 rounded-lg bg-hockey-card border border-hockey-border text-xs sm:text-sm text-hockey-text-secondary">
+                Все заявки принимаем на почту{" "}
+                <a href="mailto:hockeylivesite@yahoo.com" className="text-hockey-accent hover:text-hockey-accent-hover transition-colors">
+                  hockeylivesite@yahoo.com
+                </a>
+              </div>
+            )}
           </div>
 
           <div>
@@ -47,11 +74,14 @@ export default function Footer() {
             с просьбой удалить его.
           </p>
           <p className="text-[10px] sm:text-xs text-hockey-text-muted leading-relaxed">
+            Все логотипы лиг <a href="https://www.khl.ru/" target="_blank" rel="noopener noreferrer" className="text-hockey-accent hover:text-hockey-accent-hover transition-colors">КХЛ</a>, <a href="https://mhl.khl.ru/" target="_blank" rel="noopener noreferrer" className="text-hockey-accent hover:text-hockey-accent-hover transition-colors">МХЛ</a> и <a href="https://www.vhlru.ru/" target="_blank" rel="noopener noreferrer" className="text-hockey-accent hover:text-hockey-accent-hover transition-colors">ВХЛ</a>, а также логотипы команд используются из сторонних сервисов и являются собственностью соответствующих организаций.
+          </p>
+          <p className="text-[10px] sm:text-xs text-hockey-text-muted leading-relaxed">
             Используя данный сервис, вы подтверждаете, что вам исполнилось 18 лет, и вы принимаете <Link href="/terms" className="text-hockey-accent hover:text-hockey-accent-hover transition-colors">условия использования</Link>.
           </p>
           <div className="flex items-center justify-between pt-3 sm:pt-4">
             <p className="text-[10px] sm:text-xs text-hockey-text-muted">
-              &copy; 2026 HOCKEY LIVE. Все права защищены.
+              &copy; 2026 HOCKEY LIVE
             </p>
             <div className="flex items-center gap-3">
               <a
@@ -61,6 +91,14 @@ export default function Footer() {
                 className="w-8 h-8 rounded-lg bg-hockey-card border border-hockey-border flex items-center justify-center hover:border-hockey-accent/40 hover:bg-hockey-accent/10 transition-all duration-200"
               >
                 <img src="/vk-mono.svg" alt="VK" className="w-4 h-4 opacity-60 group-hover:opacity-100" />
+              </a>
+              <a
+                href="https://t.me/hockey_live27"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-8 h-8 rounded-lg bg-hockey-card border border-hockey-border flex items-center justify-center hover:border-hockey-accent/40 hover:bg-hockey-accent/10 transition-all duration-200"
+              >
+                <img src="/telegram-mono.svg" alt="Telegram" className="w-4 h-4 opacity-60 group-hover:opacity-100" />
               </a>
               <span className="text-[10px] sm:text-xs text-hockey-text-muted">
                 18+ | 4+

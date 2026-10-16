@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { getTeamLogo } from "@/lib/team-logos";
 import { parseMatchDate } from "@/lib/parse-date";
 import RemindButton from "@/components/RemindButton";
+import { useScoreToggle } from "@/context/ScoreToggleContext";
+import { useFavorites } from "@/lib/FavoritesContext";
 
 interface Match {
   id: number;
@@ -15,10 +17,24 @@ interface Match {
   datetime_utc: string;
   status: string;
   stream_urls: { url: string; quality: string; source: string }[];
+  home_score?: number | null;
+  away_score?: number | null;
+  current_period?: string | null;
 }
 
-export default function MatchCard({ match, featured = false, isFavorite = false, score = null, finish = null }: { match: Match; featured?: boolean; isFavorite?: boolean; score?: string | null; finish?: string | null }) {
+function teamNameClass(name: string): string {
+  if (name === "Автомобилист") return "text-[6.5pt] sm:text-[8pt]";
+  return name.length > 12 ? "text-[13px] sm:text-[15px]" : "text-sm sm:text-base";
+}
+
+export default function MatchCard({ match, featured = false, score = null, finish = null }: { match: Match; featured?: boolean; score?: string | null; finish?: string | null }) {
   const [countdown, setCountdown] = useState("");
+  const { showScores } = useScoreToggle();
+  const { isFavorite } = useFavorites();
+
+  const favHome = match.status === "live" && isFavorite(match.team_home);
+  const favAway = match.status === "live" && isFavorite(match.team_away);
+  const favoriteLive = favHome || favAway;
 
   // Логотипы показываем только для матчей КХЛ
   const showLogos = match.league === "KHL";
@@ -39,11 +55,11 @@ export default function MatchCard({ match, featured = false, isFavorite = false,
   }, [match.status, match.datetime_utc]);
 
   return (
-    <Link href={`/match/${match.id}`}>
+    <Link href={`/${match.league.toLowerCase()}/match/${match.id}`}>
       <div
         className={`group relative rounded-xl overflow-hidden transition-all duration-300 card-hover ${
-          isFavorite && match.status === "live"
-            ? "bg-hockey-accent/10 border border-hockey-accent/30 animate-glow-red"
+          favoriteLive
+            ? "bg-hockey-accent/15 border-2 border-hockey-accent/60 animate-glow-fav"
             : featured
               ? "bg-hockey-accent/10 border border-hockey-accent/30 animate-glow-red"
               : "bg-hockey-card border border-hockey-border hover:border-hockey-border-light"
@@ -51,13 +67,31 @@ export default function MatchCard({ match, featured = false, isFavorite = false,
       >
         <div className="absolute inset-0 bg-gradient-to-r from-hockey-accent/0 via-hockey-accent/[0.02] to-hockey-accent/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
+        {favoriteLive && (
+          <>
+            <span className="bg-ice-particle absolute left-[12%] bottom-3 w-1.5 h-1.5 rounded-full" style={{ animationDelay: "0s" }} />
+            <span className="bg-ice-particle absolute left-[47%] bottom-4 w-1 h-1 rounded-full" style={{ animationDelay: "1.4s" }} />
+            <span className="bg-ice-particle absolute left-[83%] bottom-3 w-1.5 h-1.5 rounded-full" style={{ animationDelay: "2.8s" }} />
+          </>
+        )}
+
         <div className="relative p-3 sm:p-5">
           <div className="flex items-center justify-between mb-3 sm:mb-4">
-            <img
-              src={`/${match.league}.svg`}
-              alt={match.league}
-              className="h-4 sm:h-5 w-auto"
-            />
+            <div className="flex items-center gap-2 min-w-0">
+              <img
+                src={`/${match.league}.svg`}
+                alt={match.league}
+                className="h-4 sm:h-5 w-auto"
+              />
+              {favoriteLive && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-hockey-accent/20 border border-hockey-accent/40 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-hockey-accent">
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  </svg>
+                  Моя команда
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-2">
               {match.status === "live" ? (
                 <div className="flex items-center gap-1.5">
@@ -74,31 +108,45 @@ export default function MatchCard({ match, featured = false, isFavorite = false,
 
           <div className="flex items-center justify-between gap-2 sm:gap-3">
             <div className="flex-1 flex items-center justify-end gap-2 sm:gap-3">
-              <p className="text-sm sm:text-base font-bold leading-tight text-right">{match.team_home}</p>
+              <p className={`font-bold leading-tight text-right ${teamNameClass(match.team_home)} ${favHome ? "text-hockey-accent" : ""}`}>{match.team_home}</p>
               {showLogos && getTeamLogo(match.team_home) && (
                 <img src={getTeamLogo(match.team_home)!} alt={match.team_home} className="w-8 h-8 sm:w-10 sm:h-10 object-contain" />
               )}
             </div>
             <div className="flex-shrink-0 px-1 sm:px-2">
-              {match.status === "finished" && score ? (
-                <span className="flex flex-col items-center leading-none">
-                  <span className="text-base sm:text-xl font-black tabular-nums whitespace-nowrap">{score}</span>
-                  {finish === "ot" && (
-                    <span className="text-[9px] sm:text-[10px] font-bold text-hockey-text-muted mt-0.5">ОТ</span>
-                  )}
-                  {finish === "so" && (
-                    <span className="text-[9px] sm:text-[10px] font-bold text-hockey-text-muted mt-0.5">Б</span>
-                  )}
-                </span>
+              {showScores ? (
+                match.status === "finished" &&
+                (score || (match.home_score != null && match.away_score != null)) ? (
+                  <span className="flex flex-col items-center leading-none">
+                    <span className="text-base sm:text-xl font-black tabular-nums whitespace-nowrap">
+                      {score ?? `${match.home_score} : ${match.away_score}`}
+                    </span>
+                    {finish === "ot" && (
+                      <span className="text-[9px] sm:text-[10px] font-bold text-hockey-text-muted mt-0.5">ОТ</span>
+                    )}
+                    {finish === "so" && (
+                      <span className="text-[9px] sm:text-[10px] font-bold text-hockey-text-muted mt-0.5">Б</span>
+                    )}
+                  </span>
+                ) : match.status === "live" && match.home_score != null && match.away_score != null ? (
+                  <span className="flex flex-col items-center leading-none">
+                    <span className="text-base sm:text-xl font-black tabular-nums whitespace-nowrap">{match.home_score} : {match.away_score}</span>
+                    {match.current_period && (
+                      <span className="text-[9px] sm:text-[10px] font-bold text-hockey-live mt-0.5">{match.current_period}</span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="text-[10px] sm:text-xs font-black text-hockey-text-muted">VS</span>
+                )
               ) : (
-                <span className="text-[10px] sm:text-xs font-black text-hockey-text-muted">VS</span>
+                <span className="text-[10px] sm:text-xs text-hockey-text-muted">{match.current_period ?? "VS"}</span>
               )}
             </div>
             <div className="flex-1 flex items-center gap-2 sm:gap-3">
               {showLogos && getTeamLogo(match.team_away) && (
                 <img src={getTeamLogo(match.team_away)!} alt={match.team_away} className="w-8 h-8 sm:w-10 sm:h-10 object-contain" />
               )}
-              <p className="text-sm sm:text-base font-bold leading-tight text-left">{match.team_away}</p>
+              <p className={`font-bold leading-tight text-left ${teamNameClass(match.team_away)} ${favAway ? "text-hockey-accent" : ""}`}>{match.team_away}</p>
             </div>
           </div>
 
@@ -107,7 +155,13 @@ export default function MatchCard({ match, featured = false, isFavorite = false,
               {parseMatchDate(match.datetime_utc).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
             </span>
             {match.status === "pre_game" ? (
-              <RemindButton />
+              <RemindButton
+                league={match.league}
+                teamHome={match.team_home}
+                teamAway={match.team_away}
+                matchId={match.id}
+                datetimeUtc={match.datetime_utc}
+              />
             ) : (
               <span className={`text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg transition-all duration-200 ${
                 featured

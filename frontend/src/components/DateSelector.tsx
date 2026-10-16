@@ -1,23 +1,64 @@
 "use client";
 
-import { useMemo } from "react";
-import { getKhlDates } from "@/data/khl-calendar";
+import { useMemo, useRef, useEffect } from "react";
+import { useKhlCalendar } from "@/lib/khl-calendar";
 
 interface DateSelectorProps {
   selected: string;
   onSelect: (date: string) => void;
 }
 
+function fallbackDates(): string[] {
+  const out: string[] = [];
+  const base = new Date();
+  for (let d = -7; d <= 60; d++) {
+    const x = new Date(base.getFullYear(), base.getMonth(), base.getDate() + d);
+    out.push(
+      `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`
+    );
+  }
+  return out;
+}
+
 export default function DateSelector({ selected, onSelect }: DateSelectorProps) {
-  const allDates = useMemo(() => getKhlDates(), []);
+  const { matches: calendar } = useKhlCalendar();
+  const allDates = useMemo(() => {
+    const set = new Set<string>();
+    for (const m of calendar) set.add(m.date);
+    return set.size > 0 ? Array.from(set).sort() : fallbackDates();
+  }, [calendar]);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const surroundingDates = useMemo(() => {
     const idx = allDates.indexOf(selected);
-    if (idx === -1) return allDates.slice(0, 15);
-    const start = Math.max(0, idx - 7);
-    const end = Math.min(allDates.length, idx + 8);
+    if (idx !== -1) {
+      const start = Math.max(0, idx - 7);
+      const end = Math.min(allDates.length, idx + 8);
+      return allDates.slice(start, end);
+    }
+    const todayStr = new Date().toISOString().split("T")[0];
+    let nearestIdx = 0;
+    let minDiff = Infinity;
+    for (let i = 0; i < allDates.length; i++) {
+      const diff = Math.abs(new Date(allDates[i]).getTime() - new Date(todayStr).getTime());
+      if (diff < minDiff) { minDiff = diff; nearestIdx = i; }
+    }
+    const start = Math.max(0, nearestIdx - 7);
+    const end = Math.min(allDates.length, nearestIdx + 8);
     return allDates.slice(start, end);
   }, [allDates, selected]);
+
+  useEffect(() => {
+    if (!scrollRef.current) return;
+    const container = scrollRef.current;
+    const activeBtn = container.querySelector<HTMLElement>("[data-active='true']");
+    if (activeBtn) {
+      const containerWidth = container.offsetWidth;
+      const btnLeft = activeBtn.offsetLeft;
+      const btnWidth = activeBtn.offsetWidth;
+      container.scrollTo({ left: btnLeft - containerWidth / 2 + btnWidth / 2, behavior: "smooth" });
+    }
+  }, [surroundingDates]);
 
   const canGoBack = surroundingDates[0] !== allDates[0];
   const canGoForward = surroundingDates[surroundingDates.length - 1] !== allDates[allDates.length - 1];
@@ -72,13 +113,14 @@ export default function DateSelector({ selected, onSelect }: DateSelectorProps) 
         </svg>
       </button>
 
-      <div className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-1 scrollbar-hide">
+      <div ref={scrollRef} className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-1 scrollbar-hide">
         {surroundingDates.map((dateStr) => {
           const active = selected === dateStr;
           const today = isToday(dateStr);
           return (
             <button
               key={dateStr}
+              data-active={active ? "true" : undefined}
               onClick={() => onSelect(dateStr)}
               className={`flex-shrink-0 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-center transition-all duration-200 min-w-[60px] sm:min-w-[72px] ${
                 active

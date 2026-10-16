@@ -9,4 +9,5 @@ async def get_leagues():
         {"id": "KHL", "name": "КХЛ"},
         {"id": "VHL", "name": "ВХЛ"},
         {"id": "MHL", "name": "МХЛ"},
+        {"id": "NHL", "name": "НХЛ"},
     ]

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.3",
+    "hls.js": "^1.7.3",
     "next": "latest",
     "react": "latest",
     "react-dom": "latest"

@@ -1,13 +1,16 @@
 "use client";
 
 import { FavoritesProvider } from "@/lib/FavoritesContext";
+import { ScoreToggleProvider } from "@/context/ScoreToggleContext";
 import ToastContainer from "@/components/Toast";
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   return (
     <FavoritesProvider>
-      {children}
-      <ToastContainer />
+      <ScoreToggleProvider>
+        {children}
+        <ToastContainer />
+      </ScoreToggleProvider>
     </FavoritesProvider>
   );
 }

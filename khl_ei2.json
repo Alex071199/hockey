@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Страница не найдена (404)</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <link href='/fonts.css' rel='stylesheet' type='text/css'>
+  <style type="text/css">
+    * {margin:0; padding: 0;}
+    body {background: #eef0f2; font-family: 'Open Sans', sans-serif; font-size:24px; line-height: 30px;}
+    a, a:visited {color: #3782b5; float: left; height: 26px; border-bottom: 1px solid; border-bottom-color: #c0d4e3; border-bottom-color: rgba(55, 130, 181, 0.25); text-decoration: none; font-size:18px; line-height: 29px;}
+    a:hover, a:active { border-bottom: none;}
+    p {margin-bottom: 27px;}
+    h1 {font-size:36px; margin-bottom: 30px; line-height: 24px; margin-left:-2px; text-shadow: 0px 2px 0px #fff;}
+    .message {position: absolute; height: 200px; width: 100%; min-width: 900px; top: 50%; margin-top: -100px;}
+    .col-left {width: 50%; float: left;}
+    .col-right {float: left; max-width: 450px;}
+    .clear{clear:both;}
+  </style>
+</head>
+
+<body>
+  <div class="message">
+    <div class="col-left">
+      <img src="/images/error_404.png" width="357px" height="158px" style="float:right; margin-right: 84px">
+      <div class="clear"></div>
+    </div>
+    <div class="col-right">
+      <h1>Страница не найдена</h1>
+      <p>Вы ошиблись адресом, <br>или такой страницы больше нет.</p>
+      <p>Обратитесь по адресу <a href="mailto:tech-support@inventos.ru" target="_blank">tech-support@inventos.ru</a></p>
+      <br />
+      <p><a href="/">Главная страница</a></p>
+      <div class="clear"></div>
+    </div>
+    <div class="clear"></div>
+  </div>
+</body>
+</html>

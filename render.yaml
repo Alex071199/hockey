@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: hockey-live-api
+    runtime: docker
+    plan: free
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_ADMIN_CHAT_ID
+        sync: false
+      - key: HIGHLIGHTLY_API_KEY
+        sync: false
+      - key: HIGHLIGHTLY_API_KEYS
+        sync: false
+      - key: YOOMONEY_SECRET
+        sync: false
+      - key: YOOMONEY_WALLET
+        sync: false

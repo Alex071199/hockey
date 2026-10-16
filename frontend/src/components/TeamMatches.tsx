@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { getTeamLogo } from "@/lib/team-logos";
-import { khlCalendar, KhlMatch } from "@/data/khl-calendar";
+import { useKhlCalendar, KhlCalendarMatch } from "@/lib/khl-calendar";
 import { parseMatchDate } from "@/lib/parse-date";
 import { mskToLocal, getKhlStatus } from "@/components/KhlMatchCard";
 import {
@@ -21,6 +21,8 @@ interface ApiMatch {
   team_away: string;
   datetime_utc: string;
   status: string;
+  home_score?: number | null;
+  away_score?: number | null;
 }
 
 interface TeamMatchesProps {
@@ -81,13 +83,15 @@ export default function TeamMatches({ teams, title }: TeamMatchesProps) {
     });
   }, [teams, monthStr]);
 
+  const { matches: calendarMatches } = useKhlCalendar();
+
   const khlMatches = useMemo(() => {
-    return khlCalendar.filter((m) => {
+    return calendarMatches.filter((m) => {
       const d = new Date(m.date + "T00:00:00");
       return d.getFullYear() === year && d.getMonth() + 1 === month &&
         teams.some((t) => m.home === t || m.away === t);
     });
-  }, [teams, year, month]);
+  }, [teams, year, month, calendarMatches]);
 
   const allMatches = useMemo(() => {
     const apiByDate: Record<string, { type: "api"; match: ApiMatch }[]> = {};
@@ -98,7 +102,7 @@ export default function TeamMatches({ teams, title }: TeamMatchesProps) {
       apiByDate[key].push({ type: "api", match: m });
     });
 
-    const khlByDate: Record<string, { type: "khl"; match: KhlMatch }[]> = {};
+    const khlByDate: Record<string, { type: "khl"; match: KhlCalendarMatch }[]> = {};
     khlMatches.forEach((m) => {
       const key = localDateKey(mskToLocal(m.date, m.time));
       if (!khlByDate[key]) khlByDate[key] = [];
@@ -244,6 +248,10 @@ export default function TeamMatches({ teams, title }: TeamMatchesProps) {
                               <span className="text-sm font-black tabular-nums whitespace-nowrap">{s.text}</span>
                               {fl && <span className="text-[9px] font-bold text-hockey-text-muted mt-0.5">{fl}</span>}
                             </span>
+                          ) : done && m.home_score != null && m.away_score != null ? (
+                            <span className="text-sm font-black tabular-nums whitespace-nowrap flex-shrink-0">
+                              {m.home_score} : {m.away_score}
+                            </span>
                           ) : (
                             <span className="text-[10px] font-black text-hockey-text-muted flex-shrink-0">VS</span>
                           )}
@@ -263,9 +271,13 @@ export default function TeamMatches({ teams, title }: TeamMatchesProps) {
                     );
                   } else {
                     const m = item.match;
-                    const done = getKhlStatus(m.date, m.time) === "finished";
+                    const done = m.status === "finished" || getKhlStatus(m.date, m.time) === "finished";
                     const s = done ? scoreFor(scores[date] ?? {}, m.home, m.away) : null;
                     const fl = s ? finishLabel(s.finish) : null;
+                    const calScore =
+                      !s && done && m.score_home != null && m.score_away != null
+                        ? `${m.score_home} : ${m.score_away}`
+                        : null;
                     return (
                       <div key={`khl-${date}-${i}`} className="flex items-center gap-3 p-3 rounded-xl bg-hockey-card border border-hockey-border">
                         <img src="/KHL.svg" alt="КХЛ" className="h-4 w-auto flex-shrink-0" />
@@ -280,6 +292,10 @@ export default function TeamMatches({ teams, title }: TeamMatchesProps) {
                             <span className="flex flex-col items-center leading-none flex-shrink-0">
                               <span className="text-sm font-black tabular-nums whitespace-nowrap">{s.text}</span>
                               {fl && <span className="text-[9px] font-bold text-hockey-text-muted mt-0.5">{fl}</span>}
+                            </span>
+                          ) : calScore ? (
+                            <span className="text-sm font-black tabular-nums whitespace-nowrap flex-shrink-0">
+                              {calScore}
                             </span>
                           ) : (
                             <span className="text-[10px] font-black text-hockey-text-muted flex-shrink-0">VS</span>

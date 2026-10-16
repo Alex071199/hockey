@@ -10,18 +10,20 @@ import FavoritesFilter from "@/components/FavoritesFilter";
 import TeamMatches from "@/components/TeamMatches";
 import { useFavorites } from "@/lib/FavoritesContext";
 import { getTeamLogo } from "@/lib/team-logos";
-import { getKhlMatchesByDate } from "@/data/khl-calendar";
+import { useKhlCalendar } from "@/lib/khl-calendar";
 import {
   ScoreResult,
   buildResultsMap,
   pairKey,
   scoreFor,
+  eventIdFor,
 } from "@/lib/match-scores";
 
 const LEAGUES = [
   { id: "KHL", label: "КХЛ", logo: "/KHL.svg" },
   { id: "VHL", label: "ВХЛ", logo: "/VHL.svg" },
   { id: "MHL", label: "МХЛ", logo: "/MHL.svg" },
+  { id: "NHL", label: "НХЛ", logo: "/NHL.svg" },
 ] as const;
 
 type LeagueId = (typeof LEAGUES)[number]["id"];
@@ -38,6 +40,9 @@ interface Match {
   status: string;
   added_live?: boolean;
   stream_urls: { url: string; quality: string; source: string }[];
+  home_score?: number | null;
+  away_score?: number | null;
+  current_period?: string | null;
 }
 
 export default function SchedulePage() {
@@ -49,6 +54,7 @@ export default function SchedulePage() {
   const [results, setResults] = useState<Record<string, ScoreResult>>({});
   const [loading, setLoading] = useState(true);
   const { favorites, toggle } = useFavorites();
+  const { matches: khlCalendarMatches } = useKhlCalendar();
 
   const selectLeague = (l: LeagueId) => {
     setLeague(l);
@@ -63,7 +69,7 @@ export default function SchedulePage() {
   }, [favorites, favoritesOnly]);
 
   useEffect(() => {
-    if (league !== "KHL") {
+    if (league === "VHL") {
       setApiMatches([]);
       setResults({});
       setLoading(false);
@@ -98,10 +104,61 @@ export default function SchedulePage() {
     };
   }, [selectedDate, league]);
 
-  const khlMatches = useMemo(
-    () => (league === "KHL" ? getKhlMatchesByDate(selectedDate) : []),
-    [selectedDate, league]
-  );
+  // WebSocket: обновляем счёт в реальном времени
+  useEffect(() => {
+    if (league === "VHL") return;
+    const wsUrl = API_URL.replace(/^https/, "wss").replace(/^http/, "ws") + "/ws";
+    let ws: WebSocket | null = null;
+    try {
+      ws = new WebSocket(wsUrl);
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === "matches_update" && Array.isArray(msg.data)) {
+            const updates = (msg.data as Match[]).filter((u) => u.league === league);
+            setApiMatches((prev) => {
+              const map = new Map(prev.map((m) => [m.id, m]));
+              for (const u of updates) map.set(u.id, u);
+              return Array.from(map.values());
+            });
+            setResults((prev) => {
+              const next = { ...prev };
+              for (const u of updates) {
+                const pk = pairKey(u.team_home, u.team_away);
+                const finish =
+                  u.current_period === "Овертайм"
+                    ? "ot"
+                    : u.current_period === "Буллиты"
+                      ? "so"
+                      : "reg";
+                next[pk] = {
+                  home: u.team_home,
+                  away: u.team_away,
+                  score_home: u.home_score ?? 0,
+                  score_away: u.away_score ?? 0,
+                  finish: finish as "reg" | "ot" | "so",
+                };
+              }
+              return next;
+            });
+          }
+        } catch {}
+      };
+      ws.onerror = () => {
+        ws?.close();
+      };
+    } catch {}
+    return () => {
+      ws?.close();
+    };
+  }, [league]);
+
+  const khlMatches = useMemo(() => {
+    if (league !== "KHL") return [];
+    return khlCalendarMatches
+      .filter((m) => m.date === selectedDate)
+      .sort((a, b) => a.time.localeCompare(b.time));
+  }, [selectedDate, league, khlCalendarMatches]);
 
   const filteredApi = apiMatches;
 
@@ -207,10 +264,10 @@ export default function SchedulePage() {
           <FavoritesFilter active={favoritesOnly} onToggle={() => { setFavoritesOnly(!favoritesOnly); setSearchedTeam(""); }} />
         </div>
 
-        {league !== "KHL" ? (
+        {league === "VHL" ? (
           <div className="glass rounded-2xl p-6 sm:p-12 text-center">
             <p className="text-hockey-text-secondary text-base sm:text-lg">
-              Календарь {league === "VHL" ? "ВХЛ" : "МХЛ"} скоро появится
+              Календарь ВХЛ скоро появится
             </p>
           </div>
         ) : showTeamSearch ? (
@@ -277,6 +334,7 @@ export default function SchedulePage() {
                     })}
                     {timeKhlMatches.map((match, i) => {
                       const s = scoreFor(results, match.home, match.away);
+                      const eid = eventIdFor(results, match.home, match.away) ?? match.id ?? null;
                       return (
                         <KhlMatchCard
                           key={`khl-${time}-${i}`}
@@ -286,6 +344,9 @@ export default function SchedulePage() {
                           away={match.away}
                           score={s?.text ?? null}
                           finish={s?.finish ?? null}
+                          home_score={match.score_home ?? null}
+                          away_score={match.score_away ?? null}
+                          event_id={eid}
                         />
                       );
                     })}

@@ -11,6 +11,7 @@ export default function LeagueFilter({ selected, onSelect }: LeagueFilterProps) 
     { id: "KHL", label: "КХЛ", logo: "/KHL.svg" },
     { id: "VHL", label: "ВХЛ", logo: "/VHL.svg" },
     { id: "MHL", label: "МХЛ", logo: "/MHL.svg" },
+    { id: "NHL", label: "НХЛ", logo: "/NHL.svg" },
   ];
 
   return (

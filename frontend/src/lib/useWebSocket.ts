@@ -2,16 +2,20 @@
 
 import { useEffect, useRef, useCallback, useState } from "react";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+
 export interface WsMatch {
   id: number;
-  onhockey_id: string;
+  match_uid?: string;
   league: string;
   team_home: string;
   team_away: string;
   datetime_utc: string;
   status: string;
-  score: string | null;
-  win_type: string | null;
+  home_score?: number | null;
+  away_score?: number | null;
+  current_period?: string | null;
+  added_live?: boolean;
   stream_urls: { url: string; quality: string; source: string }[];
 }
 
@@ -31,9 +35,9 @@ export function useWebSocket(
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = window.location.host;
-    const ws = new WebSocket(`${protocol}//${host}/ws`);
+    // WS слушает бэкенд (Railway) — на Vercel /ws не существует
+    const wsBase = API_URL.replace(/^http/, "ws"); // http→ws, https→wss
+    const ws = new WebSocket(`${wsBase}/ws`);
     wsRef.current = ws;
 
     ws.onopen = () => {

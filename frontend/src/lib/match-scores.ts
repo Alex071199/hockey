@@ -6,6 +6,7 @@ export interface ScoreResult {
   score_home: number;
   score_away: number;
   finish: "reg" | "ot" | "so";
+  khl_event_id?: number;
 }
 
 export interface Score {
@@ -46,6 +47,15 @@ export function buildResultsMap(list: ScoreResult[]): Record<string, ScoreResult
     map[pairKey(res.home, res.away)] = res;
   }
   return map;
+}
+
+export function eventIdFor(
+  results: Record<string, ScoreResult>,
+  home: string,
+  away: string
+): number | null {
+  const r = results[pairKey(home, away)];
+  return r?.khl_event_id ?? null;
 }
 
 export function finishLabel(finish: "reg" | "ot" | "so"): string | null {

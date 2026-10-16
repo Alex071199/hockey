@@ -12,7 +12,22 @@ LIVETV_ALT = "https://livetv903.me"
 
 LEAGUE_MAP = {
     "КХЛ": "KHL",
+    "МХЛ": "MHL",
 }
+
+# Jastar Hokei Ligasy (казахская молодёжная лига) — livetv показывает её
+# в общей хоккейной ленте с иконкой «МХЛ», но в МХЛ она не входит.
+JASTAR_LABEL_RE = re.compile(r"jastar|hokei\s*ligasy", re.I)
+JASTAR_KZ_RE = re.compile(r"kazakh|казах", re.I)
+JASTAR_TEAM_TOKENS = (
+    "арлан", "жас батыр", "кармет", "туран", "кулагер", "алматы",
+    "горняк", "мунаиши", "барыс", "сункар", "торпедо ук", "астана",
+    "сарыарка", "иртыш", "бейбарыс", "ентек",
+)
+JASTAR_TEAM_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(t) for t in JASTAR_TEAM_TOKENS) + r")\b",
+    re.I,
+)
 
 TEAM_RENAME = {
     "Куньлунь РС": "Шанхайские Драконы",
@@ -31,7 +46,22 @@ def _normalize_team(name: str) -> str:
     return name
 
 
-def _curl_get_sync(url: str, retries: int = 3) -> str:
+def _is_jastar(league: str, league_label: str, home: str, away: str) -> bool:
+    label = league_label or ""
+    if JASTAR_LABEL_RE.search(label):
+        return True
+    if league == "MHL" and JASTAR_KZ_RE.search(label):
+        return True
+    h = (home or "").strip().lower()
+    a = (away or "").strip().lower()
+    if "(мол)" in h or "(мол)" in a:
+        return True
+    if league == "MHL" and (JASTAR_TEAM_RE.search(h) or JASTAR_TEAM_RE.search(a)):
+        return True
+    return False
+
+
+def _curl_get_sync(url: str, retries: int = 3, timeout: int = 25) -> str:
     for attempt in range(retries):
         try:
             cmd = [
@@ -39,10 +69,10 @@ def _curl_get_sync(url: str, retries: int = 3) -> str:
                 "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "-H", "Accept-Language: ru-RU,ru;q=0.9",
                 "--connect-timeout", "15",
-                "--max-time", "25",
+                "--max-time", str(timeout),
                 url,
             ]
-            r = subprocess.run(cmd, capture_output=True, timeout=30)
+            r = subprocess.run(cmd, capture_output=True, timeout=timeout + 10)
             if r.stdout and len(r.stdout) > 500:
                 return r.stdout.decode("utf-8", errors="ignore")
         except Exception:
@@ -50,9 +80,24 @@ def _curl_get_sync(url: str, retries: int = 3) -> str:
     return ""
 
 
-async def _curl_get(url: str, retries: int = 3) -> str:
+async def _curl_get(url: str, retries: int = 3, timeout: int = 25) -> str:
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _curl_get_sync, url, retries)
+    return await loop.run_in_executor(None, _curl_get_sync, url, retries, timeout)
+
+
+async def _fetch_event_streams(eid: str, slug: str) -> list[dict]:
+    """Fetch event page streams from livetv.sx, falling back to livetv903.me."""
+    for base in (LIVETV_BASE, LIVETV_ALT):
+        try:
+            event_url = f"{base}/eventinfo/{eid}_{slug}/"
+            event_html = await _curl_get(event_url, retries=4, timeout=40)
+            if event_html and len(event_html) > 2000:
+                streams = _parse_event_streams(event_html)
+                if streams:
+                    return streams
+        except Exception:
+            pass
+    return []
 
 
 def _parse_matches(html: str) -> list[dict]:
@@ -111,6 +156,9 @@ def _parse_matches(html: str) -> list[dict]:
         time_str = time_match.group(1) if time_match else ""
         league_label = time_match.group(2) if time_match else league_text
 
+        if _is_jastar(league, league_label, home, away):
+            continue
+
         score_match = re.search(r'&nbsp;\s*(\d+)\s*:\s*(\d+)', chunk)
         score = f"{score_match.group(1)}:{score_match.group(2)}" if score_match else None
 
@@ -154,6 +202,21 @@ def _parse_event_streams(html: str) -> list[dict]:
         transport = m_t.group(1) if m_t else "ifr"
         if transport == "acestream":
             continue  # same as the direct acestream:// link, added below
+        if transport == "youtube":
+            # youtube-транспорт веб-плеера livetv — это просто embed ролика;
+            # сам webplayer2.php отдаёт «сайт» с рекламой и ссылками
+            m_c = re.search(r"[?&]c=([A-Za-z0-9_-]{6,})", path)
+            if m_c:
+                vid = m_c.group(1)
+                if vid.startswith("PL"):
+                    add(f"https://www.youtube.com/embed/videoseries?list={vid}", "livetv_youtube")
+                else:
+                    add(f"https://www.youtube.com/embed/{vid}", "livetv_youtube")
+            else:
+                # webplayer для youtube-транспорта — дубль того же embed,
+                # а через прокси YouTube отдаёт Error 153 (нет referrer)
+                add(path, "livetv_webplayer")
+            continue
         source = "livetv" if transport == "ifr" else f"livetv_{transport}"
         add(path, source)
 
@@ -174,14 +237,7 @@ async def scrape_livetv_matches() -> list[dict]:
 
     enriched = []
     for m in basic_matches:
-        streams = []
-        try:
-            event_url = f"{LIVETV_BASE}/eventinfo/{m['event_id']}_{m['slug']}/"
-            event_html = await _curl_get(event_url)
-            if event_html:
-                streams = _parse_event_streams(event_html)
-        except Exception:
-            pass
+        streams = await _fetch_event_streams(m["event_id"], m["slug"])
 
         dt_utc = _parse_time(m["time_str"]) if m["time_str"] else None
 
