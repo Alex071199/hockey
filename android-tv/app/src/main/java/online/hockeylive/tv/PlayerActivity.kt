@@ -19,6 +19,7 @@ class PlayerActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_MATCH_JSON = "match_json"
+        const val EXTRA_FORCE_ACE = "force_ace"
     }
 
     private var player: ExoPlayer? = null
@@ -68,12 +69,14 @@ class PlayerActivity : ComponentActivity() {
         }
 
         val title = "${m.teamHome} — ${m.teamAway}"
+        val forceAce = intent.getStringExtra(EXTRA_FORCE_ACE)
         val aceHash = m.aceHashes.firstOrNull()
         val prime = m.primeUrl
 
         when {
-            aceHash != null -> startAce(aceHash, title)
+            forceAce != null -> startAce(forceAce, title)
             prime != null -> playUrl(prime, title)
+            aceHash != null -> startAce(aceHash, title)
             else -> showError("Нет доступных источников\n\n$title")
         }
     }

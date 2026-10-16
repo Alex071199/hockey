@@ -6,8 +6,8 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -31,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -40,6 +42,19 @@ import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import kotlinx.coroutines.delay
 import kotlinx.serialization.encodeToString
+
+object Theme {
+    val bg = Color(0xFF0A0A0A)
+    val card = Color(0xFF161616)
+    val cardHover = Color(0xFF1C1C1C)
+    val border = Color(0xFF222222)
+    val text = Color(0xFFFFFFFF)
+    val textSecondary = Color(0xFF888888)
+    val textMuted = Color(0xFF555555)
+    val accent = Color(0xFFE11D48)
+    val accentHover = Color(0xFFF43F5E)
+    val live = Color(0xFFEF4444)
+}
 
 class MainActivity : ComponentActivity() {
 
@@ -60,35 +75,53 @@ class MainActivity : ComponentActivity() {
                         error = "Ошибка загрузки: ${e.message}"
                     }
                     loading = false
-                    delay(60_000)
+                    delay(30_000)
                 }
             }
 
             HomeScreen(
-                matches = matches,
+                matches = matches.filter { it.isLive },
                 error = error,
                 loading = loading,
-                onMatchClick = { match ->
-                    val intent = Intent(context, PlayerActivity::class.java)
-                    intent.putExtra(PlayerActivity.EXTRA_MATCH_JSON, JsonFormat.json.encodeToString(match))
-                    context.startActivity(intent)
-                },
-                onSettingsClick = {
-                    val input = android.widget.EditText(context).apply {
-                        setText(AppSettings.serverUrl(context))
-                        hint = "https://..."
-                    }
-                    android.app.AlertDialog.Builder(context)
-                        .setTitle("Адрес сервера")
-                        .setView(input)
-                        .setPositiveButton("Сохранить") { _, _ ->
-                            AppSettings.setServerUrl(context, input.text.toString())
-                            Toast.makeText(context, "Сохранено", Toast.LENGTH_SHORT).show()
-                        }
-                        .setNegativeButton("Отмена", null)
-                        .show()
-                },
+                onMatchClick = { match -> openMatch(context, match) },
             )
+        }
+    }
+
+    private fun openMatch(context: android.content.Context, match: Match) {
+        val aceHash = match.aceHashes.firstOrNull()
+        val prime = match.primeUrl
+        val title = "${match.teamHome} — ${match.teamAway}"
+
+        when {
+            aceHash != null && prime != null -> {
+                val options = arrayOf("Основной", "AceStream")
+                android.app.AlertDialog.Builder(context)
+                    .setTitle(title)
+                    .setItems(options) { _, which ->
+                        val intent = Intent(context, PlayerActivity::class.java)
+                        intent.putExtra(PlayerActivity.EXTRA_MATCH_JSON, JsonFormat.json.encodeToString(match))
+                        if (which == 1) {
+                            intent.putExtra(PlayerActivity.EXTRA_FORCE_ACE, aceHash)
+                        }
+                        context.startActivity(intent)
+                    }
+                    .setNegativeButton("Отмена", null)
+                    .show()
+            }
+            aceHash != null -> {
+                val intent = Intent(context, PlayerActivity::class.java)
+                intent.putExtra(PlayerActivity.EXTRA_MATCH_JSON, JsonFormat.json.encodeToString(match))
+                context.startActivity(intent)
+            }
+            prime != null -> {
+                val intent = Intent(context, PlayerActivity::class.java)
+                intent.putExtra(PlayerActivity.EXTRA_MATCH_JSON, JsonFormat.json.encodeToString(match))
+                context.startActivity(intent)
+            }
+            else -> {
+                Toast.makeText(context, "Нет доступных источников", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 }
@@ -100,15 +133,15 @@ fun HomeScreen(
     error: String?,
     loading: Boolean,
     onMatchClick: (Match) -> Unit,
-    onSettingsClick: () -> Unit,
 ) {
     val khl = matches.filter { it.league.equals("KHL", true) }
     val nhl = matches.filter { it.league.equals("NHL", true) }
+    val other = matches.filter { !it.league.equals("KHL", true) && !it.league.equals("NHL", true) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0D1117))
+            .background(Theme.bg)
             .padding(vertical = 24.dp),
     ) {
         Row(
@@ -117,9 +150,15 @@ fun HomeScreen(
                 .padding(horizontal = 32.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Image(
+                painter = painterResource(R.drawable.mainlogo),
+                contentDescription = "HOCKEY LIVE",
+                modifier = Modifier.size(40.dp),
+            )
+            Spacer(Modifier.width(12.dp))
             Text(
                 text = "HOCKEY LIVE",
-                color = Color(0xFF4AC7FF),
+                color = Theme.text,
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,
             )
@@ -130,24 +169,9 @@ fun HomeScreen(
                     error != null -> error
                     else -> "KHL · NHL"
                 },
-                color = Color(0xFF8B98A5),
+                color = Theme.textSecondary,
                 fontSize = 14.sp,
             )
-            Spacer(Modifier.weight(1f))
-            Surface(
-                onClick = onSettingsClick,
-                colors = ClickableSurfaceDefaults.colors(
-                    containerColor = Color(0xFF161B22),
-                    focusedContainerColor = Color(0xFF1F2937),
-                ),
-            ) {
-                Text(
-                    text = "  Настройки  ",
-                    color = Color(0xFFC9D1D9),
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(vertical = 8.dp),
-                )
-            }
         }
 
         Spacer(Modifier.height(20.dp))
@@ -158,16 +182,19 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             if (khl.isNotEmpty()) {
-                item { LeagueRow("КХЛ", khl, onMatchClick) }
+                item { LeagueRow("КХЛ", "KHL", khl, onMatchClick) }
             }
             if (nhl.isNotEmpty()) {
-                item { LeagueRow("НХЛ", nhl, onMatchClick) }
+                item { LeagueRow("НХЛ", "NHL", nhl, onMatchClick) }
+            }
+            if (other.isNotEmpty()) {
+                item { LeagueRow("Другие лиги", null, other, onMatchClick) }
             }
             if (!loading && error == null && matches.isEmpty()) {
                 item {
                     Text(
-                        text = "Матчей пока нет",
-                        color = Color(0xFF8B98A5),
+                        text = "Нет активных трансляций",
+                        color = Theme.textSecondary,
                         fontSize = 16.sp,
                         modifier = Modifier.padding(horizontal = 32.dp),
                     )
@@ -178,15 +205,23 @@ fun HomeScreen(
 }
 
 @Composable
-fun LeagueRow(title: String, matches: List<Match>, onMatchClick: (Match) -> Unit) {
+fun LeagueRow(title: String, leagueCode: String?, matches: List<Match>, onMatchClick: (Match) -> Unit) {
     Column {
-        Text(
-            text = title,
-            color = Color(0xFFC9D1D9),
-            fontSize = 20.sp,
-            fontWeight = FontWeight.SemiBold,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
-        )
+        ) {
+            if (leagueCode != null) {
+                LeagueLogo(leagueCode, height = 24.dp)
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(
+                text = title,
+                color = Theme.text,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
         LazyRow(
             contentPadding = PaddingValues(horizontal = 32.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -204,81 +239,75 @@ fun MatchCard(match: Match, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = Color(0xFF161B22),
-            focusedContainerColor = Color(0xFF253040),
+            containerColor = Theme.card,
+            focusedContainerColor = Theme.cardHover,
         ),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.03f),
     ) {
         Column(
             modifier = Modifier
-                .width(280.dp)
+                .width(300.dp)
                 .padding(16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (match.isLive) {
-                    Text(
-                        text = " LIVE ",
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .background(Color(0xFFD6293E))
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                }
                 Text(
                     text = match.currentPeriod ?: match.status,
-                    color = Color(0xFF8B98A5),
+                    color = Theme.textSecondary,
                     fontSize = 12.sp,
                 )
+                Spacer(Modifier.weight(1f))
+                if (match.isLive) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "●",
+                            color = Theme.live,
+                            fontSize = 10.sp,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "LIVE",
+                            color = Theme.live,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
             }
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = match.teamHome,
-                color = Color(0xFFE8EDF3),
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 2,
-            )
-            Text(
-                text = match.teamAway,
-                color = Color(0xFFE8EDF3),
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 2,
-            )
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TeamLogo(match.teamHome, size = 40.dp)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = match.teamHome,
+                    color = Theme.text,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TeamLogo(match.teamAway, size = 40.dp)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = match.teamAway,
+                    color = Theme.text,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    modifier = Modifier.weight(1f),
+                )
+            }
             if (match.displayScore.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
                 Text(
                     text = match.displayScore,
-                    color = Color(0xFF4AC7FF),
-                    fontSize = 22.sp,
+                    color = Theme.accent,
+                    fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                 )
             }
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (match.primeUrl != null) {
-                    SourceBadge("PRIME", Color(0xFF238636))
-                }
-                if (match.aceHashes.isNotEmpty()) {
-                    SourceBadge("ACE", Color(0xFF8957E5))
-                }
-            }
         }
     }
-}
-
-@Composable
-fun SourceBadge(text: String, color: Color) {
-    Text(
-        text = text,
-        color = Color.White,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier
-            .background(color)
-            .padding(horizontal = 8.dp, vertical = 3.dp),
-    )
 }
