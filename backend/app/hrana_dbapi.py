@@ -90,7 +90,7 @@ def _encode_value(v):
 class Connection:
     def __init__(self, database, auth_token=None, secure=True, timeout=30.0, **_):
         scheme = "https" if secure else "http"
-        host = database or ""
+        host = "".join((database or "").split())
         for prefix in ("https://", "http://", "libsql://"):
             if host.startswith(prefix):
                 host = host[len(prefix):]

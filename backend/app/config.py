@@ -43,8 +43,14 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-settings.TURSO_AUTH_TOKEN = (settings.TURSO_AUTH_TOKEN or "").strip()
-settings.TURSO_DATABASE_URL = (settings.TURSO_DATABASE_URL or "").strip()
+
+
+def _squash_ws(value: str) -> str:
+    return "".join((value or "").split())
+
+
+settings.TURSO_AUTH_TOKEN = _squash_ws(settings.TURSO_AUTH_TOKEN)
+settings.TURSO_DATABASE_URL = _squash_ws(settings.TURSO_DATABASE_URL)
 
 
 def _resolve_database_url() -> str:
