@@ -13,7 +13,7 @@ object ApiClient {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    private val listAdapter = JsonFormat.json.serializer(ListSerializer(Match.serializer()))
+    private val listAdapter = ListSerializer(Match.serializer())
 
     suspend fun fetchMatches(server: String): List<Match> = withContext(Dispatchers.IO) {
         val all = mutableListOf<Match>()
@@ -22,12 +22,11 @@ object ApiClient {
                 .url("$server/api/schedule?league=$league")
                 .header("Accept", "application/json")
                 .build()
-            http.newCall(req).execute().use { resp ->
-                if (resp.isSuccessful) {
-                    val body = resp.body?.string() ?: continue
-                    val items = JsonFormat.json.decodeFromString(listAdapter, body)
-                    all += items
-                }
+            val body = http.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) resp.body?.string() else null
+            }
+            if (body != null) {
+                all += JsonFormat.json.decodeFromString(listAdapter, body)
             }
         }
         all
