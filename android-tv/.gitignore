@@ -9,3 +9,4 @@ captures/
 .cxx/
 *.apk
 *.aab
+!app/src/main/assets/engine/*.apk

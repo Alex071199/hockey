@@ -16,6 +16,7 @@
         <package android:name="org.acestream.media.atv" />
         <package android:name="org.acestream.core" />
         <package android:name="org.acestream.core.atv" />
+        <package android:name="org.acestream.core.web" />
     </queries>
 
     <application

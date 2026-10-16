@@ -247,6 +247,7 @@ public class ServiceClient {
                 add("org.acestream.media.atv");
                 add("org.acestream.core");
                 add("org.acestream.core.atv");
+                add("org.acestream.core.web");
             }
         };
         for (String packageName : knownPackages) {

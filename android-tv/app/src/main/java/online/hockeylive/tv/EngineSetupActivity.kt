@@ -12,18 +12,9 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.core.content.FileProvider
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
-import java.util.concurrent.TimeUnit
 
 class EngineSetupActivity : ComponentActivity() {
-
-    private val http = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .build()
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var statusText: TextView
@@ -50,55 +41,46 @@ class EngineSetupActivity : ComponentActivity() {
         }
 
         root.addView(text("Движок Ace Stream", 28f, 0xFF4AC7FF.toInt()))
-        root.addView(text("\nДля просмотра AceStream-трансляций нужен бесплатный движок Ace Stream."))
-        root.addView(text("Установите его один раз — приложение само будет его запускать.\n"))
+        root.addView(text("\nДвижок уже встроен в приложение — установка не требует интернета."))
+        root.addView(text("Нажмите кнопку ниже один раз.\n"))
         root.addView(text("Архитектура: ${Build.SUPPORTED_ABIS.firstOrNull() ?: "неизвестно"}", 14f, 0xFF8B98A5.toInt()))
-        root.addView(text("Ссылка: ${engineUrl()}\n", 12f, 0xFF8B98A5.toInt()))
 
-        statusText = text("Нажмите кнопку ниже, чтобы скачать и установить движок.")
+        statusText = text("\nНажмите «Установить», чтобы распаковать и запустить установщик.")
         root.addView(statusText)
 
         root.addView(text("\n"))
 
         button = Button(this).apply {
-            text = "Скачать и установить"
-            setOnClickListener { downloadAndInstall() }
+            text = "Установить"
+            setOnClickListener { extractAndInstall() }
         }
         root.addView(button)
     }
 
-    private fun engineUrl(): String {
+    private fun engineAsset(): String {
         val abis = Build.SUPPORTED_ABIS.toList()
-        val arch = when {
-            abis.contains("arm64-v8a") -> "armv8_64"
-            abis.contains("armeabi-v7a") -> "armv7"
-            abis.contains("x86_64") -> "x86_64"
-            abis.contains("x86") -> "x86"
-            else -> "armv8_64"
+        return when {
+            abis.contains("arm64-v8a") || abis.contains("x86_64") -> "engine/armv8_64.apk"
+            else -> "engine/armv7.apk"
         }
-        return "https://download.acestream.media/products/android-tv/acestream-core/$arch/latest"
     }
 
     private fun setStatus(value: String) {
         mainHandler.post { statusText.text = value }
     }
 
-    private fun downloadAndInstall() {
+    private fun extractAndInstall() {
         button.isEnabled = false
-        setStatus("Скачиваю движок…")
+        setStatus("Распаковываю встроенный движок…")
         Thread {
             try {
-                val resp = http.newCall(Request.Builder().url(engineUrl()).build()).execute()
-                if (!resp.isSuccessful) {
-                    setStatus("Ошибка скачивания: HTTP ${resp.code}")
-                    return@Thread
-                }
-                val dir = File(filesDir, "downloads").apply { mkdirs() }
-                val file = File(dir, "acestream-engine.apk")
-                resp.body?.byteStream()?.use { input ->
+                val assetPath = engineAsset()
+                val dir = File(cacheDir, "engine").apply { mkdirs() }
+                val file = File(dir, "acestream-core.apk")
+                assets.open(assetPath).use { input ->
                     file.outputStream().use { output -> input.copyTo(output) }
                 }
-                setStatus("Устанавливаю… (${file.length() / 1024 / 1024} МБ)")
+                setStatus("Запускаю установщик… (${file.length() / 1024 / 1024} МБ)")
                 val uri: Uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
                 val intent = Intent(Intent.ACTION_VIEW).apply {
                     setDataAndType(uri, "application/vnd.android.package-archive")
@@ -106,9 +88,9 @@ class EngineSetupActivity : ComponentActivity() {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 startActivity(intent)
-                setStatus("Если установщик не открылся — разрешите установку из неизвестных источников и повторите.")
+                setStatus("Подтвердите установку в системном окне.\nПосле установки вернитесь к матчу.")
             } catch (e: Exception) {
-                setStatus("Ошибка: ${e.message}\n\nПопробуйте скачать вручную:\n${engineUrl()}")
+                setStatus("Ошибка: ${e.message}")
             } finally {
                 mainHandler.post { button.isEnabled = true }
             }
