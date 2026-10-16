@@ -43,12 +43,16 @@ async def startup_scrape():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    setup_scheduler()
-    asyncio.create_task(startup_scrape())
+    if settings.SCHEDULER_ENABLED:
+        setup_scheduler()
+        asyncio.create_task(startup_scrape())
+    else:
+        logger.info("SCHEDULER_ENABLED=false — только API, без фоновых джоб")
     poll_task = asyncio.create_task(telegram.polling_task())
     yield
     poll_task.cancel()
-    scheduler.shutdown()
+    if settings.SCHEDULER_ENABLED:
+        scheduler.shutdown()
 
 
 app = FastAPI(title="Hockey Schedule API", lifespan=lifespan, default_response_class=UtcJSONResponse)

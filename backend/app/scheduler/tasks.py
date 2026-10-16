@@ -326,7 +326,8 @@ async def _win_stream(
         st = await _get_state(win_id) or {}
         m3u8, embed = st.get("m3u8"), st.get("embed")
     if m3u8:
-        url = f"{settings.PUBLIC_API_URL}/api/broadcast/{win_id}/stream.m3u8"
+        base = (settings.PRIME_PUBLIC_URL or settings.PUBLIC_API_URL).rstrip("/")
+        url = f"{base}/api/broadcast/{win_id}/stream.m3u8"
     elif embed:
         url = embed
     else:

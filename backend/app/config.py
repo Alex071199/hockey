@@ -10,6 +10,12 @@ class Settings(BaseSettings):
     # Публичный адрес самого API — подставляется в stream_urls, которые
     # отдаём клиенту (иначе относительные ссылки на фронте не работают).
     PUBLIC_API_URL: str = ""
+    # Хост с «чистым» IP для 1win (напр. Railway EU): если задан,
+    # prime-ссылки (/stream.m3u8) ведут на него, а не на PUBLIC_API_URL.
+    PRIME_PUBLIC_URL: str = ""
+    # False — приложение работает только как API (без фоновых джоб):
+    # ставится на Render, когда синк едет на отдельном хосте (Railway).
+    SCHEDULER_ENABLED: bool = True
     ONHOCKEY_BASE_URL: str = "https://www.onhockey.tv/"
     SCRAPER_INTERVAL_MINUTES: int = 5
     SCRAPER_LIVE_INTERVAL_MINUTES: int = 5
