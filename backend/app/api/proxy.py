@@ -10,6 +10,8 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse, Response
 
+from app.config import settings
+
 router = APIRouter(prefix="/api/proxy", tags=["proxy"])
 
 CURL = shutil.which("curl") or "curl"
@@ -114,7 +116,7 @@ def _extract_iframes(html: str) -> list[str]:
 
 def _hls_player_page(m3u8_url: str, proxy: bool = True) -> str:
     if proxy:
-        proxy_base = "https://hockey-live-production.up.railway.app"
+        proxy_base = settings.PUBLIC_API_URL.rstrip("/")
         play_url = f"{proxy_base}/api/proxy/hls-proxy?url={m3u8_url}"
     else:
         play_url = m3u8_url
@@ -500,7 +502,7 @@ async def test_fetch(url: str = Query(...)):
 @router.get("/hls-proxy")
 async def hls_proxy(url: str = Query(..., description="m3u8 URL to proxy")):
     loop = asyncio.get_event_loop()
-    content = await loop.run_in_executor(None, _curl_get_bytes, url, 2, "https://hockey-live-production.up.railway.app/")
+    content = await loop.run_in_executor(None, _curl_get_bytes, url, 2, settings.PUBLIC_API_URL.rstrip("/") + "/")
     if not content:
         return Response(status_code=502)
 
@@ -518,7 +520,7 @@ async def hls_proxy(url: str = Query(..., description="m3u8 URL to proxy")):
     text = content.decode("utf-8", errors="ignore")
     parsed_orig = urlparse(url)
     orig_base = f"{parsed_orig.scheme}://{parsed_orig.netloc}"
-    proxy_base = "https://hockey-live-production.up.railway.app/api/proxy/hls-proxy"
+    proxy_base = f"{settings.PUBLIC_API_URL.rstrip('/')}/api/proxy/hls-proxy"
 
     def rewrite_seg(seg_url: str) -> str:
         if seg_url.startswith("http"):
