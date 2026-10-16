@@ -8,10 +8,16 @@ from app.config import settings
 
 def _create_engine():
     url = settings.DATABASE_URL
-    connect_args = {}
-    if url.startswith("sqlite+aiolibsql://") and settings.TURSO_AUTH_TOKEN:
-        connect_args["auth_token"] = settings.TURSO_AUTH_TOKEN
-    return create_async_engine(url, echo=False, connect_args=connect_args)
+    kwargs: dict = {}
+    if url.startswith("sqlite+aiolibsql://"):
+        from sqlalchemy.pool import AsyncAdaptedQueuePool
+
+        kwargs["poolclass"] = AsyncAdaptedQueuePool
+        if settings.TURSO_AUTH_TOKEN:
+            kwargs["connect_args"] = {"auth_token": settings.TURSO_AUTH_TOKEN}
+    else:
+        kwargs["connect_args"] = {}
+    return create_async_engine(url, echo=False, **kwargs)
 
 
 engine = _create_engine()
