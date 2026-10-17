@@ -34,6 +34,10 @@ class PlayerActivity : ComponentActivity() {
     private var statusText: TextView? = null
     private var match: Match? = null
 
+    // Очередь источников (prime — первый) и текущий индекс
+    private var sources: List<StreamUrl> = emptyList()
+    private var sourceIndex: Int = -1
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -97,29 +101,47 @@ class PlayerActivity : ComponentActivity() {
             return
         }
 
-        val title = "${m.teamHome} — ${m.teamAway}"
-        val sourceUrl = intent.getStringExtra(EXTRA_SOURCE_URL)
-            ?: m.playableSources.firstOrNull()?.url
-
-        if (sourceUrl == null) {
-            showError("Нет доступных источников\n\n$title")
+        sources = m.playableSources
+        if (sources.isEmpty()) {
+            showError("Нет доступных источников\n\n${m.teamHome} — ${m.teamAway}")
             return
         }
 
-        val source = m.playableSources.firstOrNull { it.url == sourceUrl }
-        playSource(sourceUrl, source, title)
+        // Если пользователь выбрал конкретный источник — начинаем с него,
+        // иначе с первого (prime). При ошибке — авто-фоллбэк на следующий.
+        val chosenUrl = intent.getStringExtra(EXTRA_SOURCE_URL)
+        sourceIndex = sources.indexOfFirst { it.url == chosenUrl }.takeIf { it >= 0 } ?: 0
+        playCurrent()
     }
 
-    private fun playSource(url: String, source: StreamUrl?, title: String) {
-        val isHls = source?.isHls ?: url.contains(".m3u8")
-        if (isHls) {
-            startExoPlayer(url, title)
+    private fun playCurrent() {
+        if (sourceIndex !in sources.indices) {
+            showError("Все источники недоступны.\nПопробуйте позже.")
+            return
+        }
+        val src = sources[sourceIndex]
+        val title = match?.let { "${it.teamHome} — ${it.teamAway}" } ?: ""
+        if (src.isHls) {
+            startExoPlayer(src.url, title, src)
         } else {
-            startWebView(url, title)
+            startWebView(src.url, title)
         }
     }
 
-    private fun startExoPlayer(url: String, title: String) {
+    // Фоллбэк: пробуем следующий источник
+    private fun nextSource(reason: String) {
+        val prev = sourceIndex
+        sourceIndex++
+        if (sourceIndex in sources.indices) {
+            releasePlayer()
+            playCurrent()
+        } else {
+            sourceIndex = prev
+            showError("Источник недоступен ($reason).\nВсе источники перепробованы.")
+        }
+    }
+
+    private fun startExoPlayer(url: String, title: String, src: StreamUrl) {
         showStatus("Буферизация…\n$title")
         playerView?.visibility = View.VISIBLE
         webView?.visibility = View.GONE
@@ -132,14 +154,15 @@ class PlayerActivity : ComponentActivity() {
                     if (isPlaying) hideStatus()
                 }
                 override fun onPlayerError(error: PlaybackException) {
-                    showError("Ошибка воспроизведения:\n${error.errorCodeName}")
+                    // Пробуем следующий источник вместо ошибки
+                    nextSource(error.errorCodeName)
                 }
             })
             p.setMediaItem(MediaItem.fromUri(url))
             p.playWhenReady = true
             p.prepare()
         } catch (e: Exception) {
-            showError("Ошибка: ${e.message}")
+            nextSource(e.message ?: "exception")
         }
     }
 
@@ -148,17 +171,14 @@ class PlayerActivity : ComponentActivity() {
         playerView?.visibility = View.GONE
         webView?.visibility = View.VISIBLE
         var finalUrl = url
-        // Для YouTube embed включаем автоплей
         if (url.contains("youtube.com/embed/")) {
             val sep = if (url.contains("?")) "&" else "?"
             finalUrl = url + sep + "autoplay=1&rel=0&playsinline=1"
         }
-        // Для rutube embed — автоплей
         if (url.contains("rutube.ru/play/embed/")) {
             finalUrl = url + "?autoplay=1"
         }
         webView?.loadUrl(finalUrl)
-        // Если за 15 секунд не скрыло статус — скрываем всё равно
         statusText?.postDelayed({ hideStatus() }, 15000)
     }
 
@@ -203,6 +223,12 @@ class PlayerActivity : ComponentActivity() {
         return super.onKeyDown(keyCode, event)
     }
 
+    private fun releasePlayer() {
+        player?.release()
+        player = null
+        playerView?.player = null
+    }
+
     override fun onStop() {
         super.onStop()
         player?.pause()
@@ -216,8 +242,7 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        player?.release()
-        player = null
+        releasePlayer()
         webView?.destroy()
         webView = null
     }

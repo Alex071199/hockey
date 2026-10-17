@@ -44,6 +44,7 @@ data class Match(
         get() = streamUrls
             .filter { !it.source.equals("acestream", true) && it.url.isNotBlank() }
             .distinctBy { it.source + "|" + it.url }
+            .sortedByDescending { it.source.equals("prime", true) }
 
     val displayScore: String
         get() = if (homeScore != null && awayScore != null) "$homeScore : $awayScore" else ""
