@@ -59,6 +59,10 @@ class PlayerActivity : ComponentActivity() {
     private var statsVisible = false
     private var statsRefresh: Runnable? = null
 
+    // Подсказка «стрелка вниз — статистика» (показывается один раз)
+    private var hintText: TextView? = null
+    private var hintShown = false
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -137,6 +141,28 @@ class PlayerActivity : ComponentActivity() {
         ).apply { gravity = android.view.Gravity.CENTER }
         root.addView(status, statusParams)
 
+        // Подсказка при первом запуске трансляции
+        val hint = TextView(this).apply {
+            text = "▼  Стрелка вниз — статистика матча"
+            setTextColor(0xFFDDDDDD.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            gravity = Gravity.CENTER
+            setPadding(dp(24), dp(11), dp(24), dp(11))
+            setBackgroundColor(0xCC161616.toInt())
+            visibility = View.GONE
+        }
+        root.addView(
+            hint,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                bottomMargin = dp(96)
+            },
+        )
+        hintText = hint
+
         // Overlay статистики — поверх плеера, открывается стрелкой вниз
         val statsLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -195,6 +221,7 @@ class PlayerActivity : ComponentActivity() {
         }
         val src = sources[sourceIndex]
         val title = match?.let { "${it.teamHome} — ${it.teamAway}" } ?: ""
+        showStatsHint()
         if (src.isHls) {
             startExoPlayer(src.url, title, src)
         } else {
@@ -318,6 +345,20 @@ class PlayerActivity : ComponentActivity() {
 
     private fun dp(v: Int): Int =
         (v * resources.displayMetrics.density).toInt()
+
+    private fun showStatsHint() {
+        if (hintShown) return
+        hintShown = true
+        val h = hintText ?: return
+        h.visibility = View.VISIBLE
+        h.alpha = 0f
+        h.animate().alpha(1f).setDuration(350).start()
+        h.postDelayed({
+            h.animate().alpha(0f).setDuration(400)
+                .withEndAction { h.visibility = View.GONE }
+                .start()
+        }, 6000)
+    }
 
     private fun openStats() {
         val m = match ?: return
@@ -599,29 +640,41 @@ class PlayerActivity : ComponentActivity() {
         )
     }
 
-    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        if (statsVisible) {
-            when (keyCode) {
-                KeyEvent.KEYCODE_BACK -> {
-                    closeStats()
-                    return true
+    // Клавиши перехватываем ДО view hierarchy: WebView на livetv-источниках
+    // съедает стрелки, если ждать onKeyDown (views получают событие первыми).
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            if (statsVisible) {
+                when (event.keyCode) {
+                    KeyEvent.KEYCODE_BACK -> {
+                        closeStats()
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        statsScroll?.smoothScrollBy(0, dp(320))
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        val s = statsScroll
+                        if (s != null && s.scrollY <= 0) closeStats()
+                        else s?.smoothScrollBy(0, -dp(320))
+                        return true
+                    }
                 }
-                KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    statsScroll?.smoothScrollBy(0, dp(320))
-                    return true
-                }
-                KeyEvent.KEYCODE_DPAD_UP -> {
-                    val s = statsScroll
-                    if (s != null && s.scrollY <= 0) closeStats()
-                    else s?.smoothScrollBy(0, -dp(320))
-                    return true
-                }
+            } else if (
+                event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN &&
+                match != null &&
+                player != null &&
+                playerView?.isControllerFullyVisible != true
+            ) {
+                openStats()
+                return true
             }
-        } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN && match != null) {
-            openStats()
-            return true
         }
+        return super.dispatchKeyEvent(event)
+    }
 
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         val p = player
         if (p != null && playerView?.visibility == View.VISIBLE) {
             when (keyCode) {
