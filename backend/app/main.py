@@ -78,6 +78,7 @@ from app.api.reminders import router as reminders_router
 from app.api.khl_times import router as khl_times_router
 from app.api.donations import router as donations_router
 from app.api.broadcast import router as broadcast_router
+from app.api.app_version import router as app_version_router
 
 app.include_router(schedule_router)
 app.include_router(proxy_router)
@@ -88,6 +89,7 @@ app.include_router(reminders_router)
 app.include_router(khl_times_router)
 app.include_router(donations_router)
 app.include_router(broadcast_router)
+app.include_router(app_version_router)
 
 
 @app.get("/api/health")

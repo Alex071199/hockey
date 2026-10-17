@@ -66,6 +66,8 @@ class MainActivity : ComponentActivity() {
             var error by remember { mutableStateOf<String?>(null) }
             var loading by remember { mutableStateOf(true) }
             var pendingMatch by remember { mutableStateOf<Match?>(null) }
+            var updateInfo by remember { mutableStateOf<AppVersionInfo?>(null) }
+            var updateStatus by remember { mutableStateOf<String?>(null) }
 
             LaunchedEffect(Unit) {
                 while (true) {
@@ -77,6 +79,15 @@ class MainActivity : ComponentActivity() {
                     }
                     loading = false
                     delay(30_000)
+                }
+            }
+
+            LaunchedEffect(Unit) {
+                UpdateChecker.check(AppSettings.serverUrl(context)) { info ->
+                    val currentCode = BuildConfig.VERSION_CODE
+                    if (info != null && info.version_code > currentCode && info.apk_url != null) {
+                        updateInfo = info
+                    }
                 }
             }
 
@@ -104,6 +115,20 @@ class MainActivity : ComponentActivity() {
                     onDismiss = { pendingMatch = null },
                 )
             }
+
+            updateInfo?.let { info ->
+                UpdateDialog(
+                    info = info,
+                    status = updateStatus,
+                    onUpdate = {
+                        updateStatus = "Скачиваю…"
+                        UpdateChecker.downloadAndInstall(context, info.apk_url!!) { s ->
+                            updateStatus = s
+                        }
+                    },
+                    onDismiss = { updateInfo = null },
+                )
+            }
         }
     }
 
@@ -112,6 +137,81 @@ class MainActivity : ComponentActivity() {
         intent.putExtra(PlayerActivity.EXTRA_MATCH_JSON, JsonFormat.json.encodeToString(match))
         if (forceAce != null) intent.putExtra(PlayerActivity.EXTRA_FORCE_ACE, forceAce)
         context.startActivity(intent)
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun UpdateDialog(info: AppVersionInfo, status: String?, onUpdate: () -> Unit, onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .background(Theme.card)
+                .padding(24.dp)
+                .width(360.dp),
+        ) {
+            Text(
+                text = "Доступно обновление",
+                color = Theme.accent,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "Версия ${info.version}",
+                color = Theme.text,
+                fontSize = 16.sp,
+            )
+            if (info.notes.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = info.notes,
+                    color = Theme.textSecondary,
+                    fontSize = 13.sp,
+                    maxLines = 5,
+                )
+            }
+            if (status != null) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = status,
+                    color = Theme.textSecondary,
+                    fontSize = 13.sp,
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Surface(
+                    onClick = onUpdate,
+                    colors = ClickableSurfaceDefaults.colors(
+                        containerColor = Theme.accent,
+                        focusedContainerColor = Theme.accentHover,
+                    ),
+                ) {
+                    Text(
+                        text = "  Обновить  ",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 10.dp),
+                    )
+                }
+                Surface(
+                    onClick = onDismiss,
+                    colors = ClickableSurfaceDefaults.colors(
+                        containerColor = Theme.cardHover,
+                        focusedContainerColor = Theme.border,
+                    ),
+                ) {
+                    Text(
+                        text = "  Позже  ",
+                        color = Theme.textSecondary,
+                        fontSize = 15.sp,
+                        modifier = Modifier.padding(vertical = 10.dp),
+                    )
+                }
+            }
+        }
     }
 }
 
