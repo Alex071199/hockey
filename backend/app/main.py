@@ -80,6 +80,7 @@ from app.api.donations import router as donations_router
 from app.api.broadcast import router as broadcast_router
 from app.api.app_version import router as app_version_router
 from app.api.news import router as news_router
+from app.api.tv_auth import router as tv_auth_router
 
 app.include_router(schedule_router)
 app.include_router(proxy_router)
@@ -92,6 +93,7 @@ app.include_router(donations_router)
 app.include_router(broadcast_router)
 app.include_router(app_version_router)
 app.include_router(news_router)
+app.include_router(tv_auth_router)
 
 
 @app.get("/api/health")

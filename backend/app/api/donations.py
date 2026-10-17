@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.tv_auth import issue_tv_code, mark_payment_seen
 from app.config import settings
 from app.database import get_db
 from app.models import Donation, Match
@@ -134,6 +135,31 @@ async def yoomoney_webhook(
         amount = int(float(amount_str))
     except (ValueError, TypeError):
         amount = 0
+
+    # TV-активация: label вида tv_<chat_id>_<ts> — отдельный путь платежа,
+    # идёт ДО матчевого парсинга (match_id там не число)
+    if label.startswith("tv_"):
+        tv_parts = label.split("_", 2)
+        tv_chat = tv_parts[1] if len(tv_parts) > 1 else ""
+        if amount < 50:
+            logger.warning("TV webhook: amount %d < 50 RUB, ignored", amount)
+            return {"status": "ok"}
+        if not tv_chat:
+            return {"status": "ok"}
+        if not mark_payment_seen(operation_id):
+            return {"status": "ok"}
+        code = issue_tv_code(tv_chat)
+        from app.telegram import send_message
+
+        await send_message(
+            tv_chat,
+            "✅ Оплата получена!\n\n"
+            f"Код активации для ТВ: {code}\n\n"
+            "Введите его в приложении на телевизоре.\n"
+            "Код одноразовый — работает только один раз.",
+        )
+        logger.info("TV code sent to chat_id=%s", tv_chat)
+        return {"status": "ok"}
 
     parts = label.split("_")
     match_id = int(parts[0]) if parts and parts[0].isdigit() else 0

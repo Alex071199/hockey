@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -26,6 +27,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +35,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -41,6 +44,7 @@ import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 
 object Theme {
@@ -63,6 +67,16 @@ class MainActivity : ComponentActivity() {
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContent {
             val context = LocalContext.current
+            var authorized by remember { mutableStateOf(AppSettings.isAuthorized(context)) }
+
+            if (!authorized) {
+                AuthScreen(
+                    onActivated = {
+                        AppSettings.setAuthorized(context, true)
+                        authorized = true
+                    },
+                )
+            } else {
             var matches by remember { mutableStateOf<List<Match>>(emptyList()) }
             var error by remember { mutableStateOf<String?>(null) }
             var loading by remember { mutableStateOf(true) }
@@ -129,6 +143,7 @@ class MainActivity : ComponentActivity() {
                     onDismiss = { updateInfo = null },
                 )
             }
+            }
         }
     }
 
@@ -137,6 +152,188 @@ class MainActivity : ComponentActivity() {
         intent.putExtra(PlayerActivity.EXTRA_MATCH_JSON, JsonFormat.json.encodeToString(match))
         if (source != null) intent.putExtra(PlayerActivity.EXTRA_SOURCE_URL, source.url)
         context.startActivity(intent)
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun AuthScreen(onActivated: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var code by remember { mutableStateOf("") }
+    var status by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+
+    fun activate() {
+        if (code.length != 6 || busy) return
+        busy = true
+        status = null
+        scope.launch {
+            try {
+                if (ApiClient.activateCode(AppSettings.serverUrl(context), code)) {
+                    onActivated()
+                    return@launch
+                }
+                status = "Код не найден или уже использован"
+            } catch (e: Exception) {
+                status = "Нет связи с сервером: ${e.message}"
+            }
+            busy = false
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Theme.bg)
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Image(
+            painter = painterResource(R.drawable.mainlogo),
+            contentDescription = "HOCKEY LIVE",
+            modifier = Modifier.size(72.dp),
+        )
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = "Активация приложения",
+            color = Theme.text,
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(16.dp))
+        Column(modifier = Modifier.width(620.dp)) {
+            val steps = listOf(
+                "1. Откройте Telegram и найдите бота @hockeylivenotificationbot",
+                "2. Нажмите кнопку «Подключить ТВ»",
+                "3. Оплатите активацию от 50 ₽ — бот пришлёт 6-значный код",
+                "4. Введите код ниже и нажмите «Активировать»",
+            )
+            steps.forEach { s ->
+                Text(
+                    text = s,
+                    color = Theme.textSecondary,
+                    fontSize = 15.sp,
+                    modifier = Modifier.padding(vertical = 3.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        Surface(
+            onClick = {
+                runCatching {
+                    context.startActivity(
+                        Intent(
+                            Intent.ACTION_VIEW,
+                            android.net.Uri.parse("https://t.me/hockeylivenotificationbot"),
+                        ),
+                    )
+                }
+            },
+            colors = ClickableSurfaceDefaults.colors(
+                containerColor = Theme.cardHover,
+                focusedContainerColor = Theme.accent,
+            ),
+        ) {
+            Text(
+                text = "  Открыть бота @hockeylivenotificationbot  ",
+                color = Theme.text,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(vertical = 10.dp),
+            )
+        }
+        Spacer(Modifier.height(24.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            repeat(6) { i ->
+                Box(
+                    modifier = Modifier
+                        .width(52.dp)
+                        .height(64.dp)
+                        .background(
+                            if (i == code.length) Theme.cardHover else Theme.card,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = if (i < code.length) code[i].toString() else " ",
+                        color = Theme.text,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(18.dp))
+
+        val rows = listOf(
+            listOf("1", "2", "3"),
+            listOf("4", "5", "6"),
+            listOf("7", "8", "9"),
+            listOf("⌫", "0", "OK"),
+        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            rows.forEach { row ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    row.forEach { label ->
+                        val isOk = label == "OK"
+                        val isDel = label == "⌫"
+                        Surface(
+                            onClick = {
+                                when {
+                                    isOk -> activate()
+                                    isDel -> {
+                                        if (code.isNotEmpty()) code = code.dropLast(1)
+                                        status = null
+                                    }
+                                    code.length < 6 -> {
+                                        code += label
+                                        status = null
+                                    }
+                                }
+                            },
+                            enabled = isOk || isDel || code.length < 6,
+                            colors = ClickableSurfaceDefaults.colors(
+                                containerColor = when {
+                                    isOk -> Theme.accent
+                                    isDel -> Theme.card
+                                    else -> Theme.cardHover
+                                },
+                                focusedContainerColor = if (isOk) Theme.accentHover else Theme.accent,
+                                disabledContainerColor = Theme.border,
+                            ),
+                        ) {
+                            Text(
+                                text = if (busy && isOk) "…" else label,
+                                color = if (isOk) Color.White else Theme.text,
+                                fontSize = if (isOk) 16.sp else 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier
+                                    .width(if (isOk) 110.dp else 74.dp)
+                                    .padding(vertical = 16.dp),
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+
+        if (status != null) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = status!!,
+                color = Theme.accent,
+                fontSize = 15.sp,
+            )
+        }
     }
 }
 

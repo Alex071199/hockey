@@ -3,8 +3,10 @@ package online.hockeylive.tv
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 object ApiClient {
@@ -78,4 +80,23 @@ object ApiClient {
             listOf(date)
         }
     }
+
+    /** Активация по одноразовому 6-значному коду. true — ок; false — код не годится. */
+    suspend fun activateCode(server: String, code: String): Boolean =
+        withContext(Dispatchers.IO) {
+            val body = """{"code":"$code"}"""
+                .toRequestBody("application/json".toMediaType())
+            val req = Request.Builder()
+                .url("${server.trimEnd('/')}/api/tv/activate")
+                .post(body)
+                .header("Accept", "application/json")
+                .build()
+            http.newCall(req).execute().use { resp ->
+                when {
+                    resp.isSuccessful -> true
+                    resp.code == 400 || resp.code == 410 -> false
+                    else -> throw java.io.IOException("HTTP ${resp.code}")
+                }
+            }
+        }
 }

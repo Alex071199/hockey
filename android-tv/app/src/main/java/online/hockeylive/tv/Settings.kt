@@ -5,6 +5,7 @@ import android.content.Context
 object AppSettings {
     private const val PREFS = "hockey_live_tv"
     private const val KEY_SERVER = "server_url"
+    private const val KEY_AUTHORIZED = "tv_authorized"
     const val DEFAULT_SERVER = "https://hockey-live-production-b0cc.up.railway.app"
 
     fun serverUrl(context: Context): String =
@@ -15,6 +16,17 @@ object AppSettings {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_SERVER, url.trim().trimEnd('/'))
+            .apply()
+    }
+
+    fun isAuthorized(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_AUTHORIZED, false)
+
+    fun setAuthorized(context: Context, value: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_AUTHORIZED, value)
             .apply()
     }
 }

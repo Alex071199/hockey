@@ -42,6 +42,7 @@ debug_*.html
 
 # Generated/downloaded data
 /standings.json
+tv_codes.json
 /teams_check.txt
 /liga/
 /logos/

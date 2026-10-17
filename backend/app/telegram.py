@@ -37,9 +37,28 @@ async def _call(method: str, payload: dict, timeout: float = 20.0) -> dict | Non
     return data
 
 
-async def send_message(chat_id: str | int, text: str) -> bool:
-    data = await _call("sendMessage", {"chat_id": chat_id, "text": text})
+async def send_message(
+    chat_id: str | int, text: str, keyboard: list[list[str]] | None = None
+) -> bool:
+    payload: dict = {"chat_id": chat_id, "text": text}
+    if keyboard:
+        payload["reply_markup"] = {
+            "keyboard": [[{"text": t} for t in row] for row in keyboard],
+            "resize_keyboard": True,
+            "is_persistent": True,
+        }
+    data = await _call("sendMessage", payload)
     return bool(data and data.get("ok"))
+
+
+# кнопка главного меню бота
+CONNECT_TV_BUTTON = "📺 Подключить ТВ"
+TV_MENU: list[list[str]] = [[CONNECT_TV_BUTTON]]
+
+
+def tv_payment_link(chat_id: int) -> str:
+    """Страница оплаты активации ТВ (форма ЮMoney, авто-сабмит)."""
+    return f"https://www.hockey-live.online/tv-pay?chat_id={chat_id}"
 
 
 async def _bind_code(code: str, chat_id: int) -> int:
@@ -149,6 +168,22 @@ async def _handle_message(msg: dict) -> None:
     if not is_admin:
         logger.info("telegram message from chat_id=%s (@%s): %s", chat_id, username, text[:50])
 
+    # кнопка главнего меню «Подключить ТВ» → ссылка на оплату активации
+    if text == CONNECT_TV_BUTTON:
+        await send_message(
+            chat_id,
+            "📺 Активация ТВ\n\n"
+            "Чтобы приложение на телевизоре заработало, нужна активация — "
+            "донат от 50 ₽ через ЮMoney.\n\n"
+            "1. Откройте ссылку ниже и оплатите\n"
+            "2. После оплаты в этот чат придёт 6-значный код\n"
+            "3. Введите код в приложении на телевизоре\n\n"
+            "⚠️ Код одноразовый — после активации перестаёт работать.",
+            keyboard=TV_MENU,
+        )
+        await send_message(chat_id, tv_payment_link(chat_id))
+        return
+
     if cmd == "/start":
         code = parts[1] if len(parts) > 1 else ""
         if code:
@@ -160,6 +195,7 @@ async def _handle_message(msg: dict) -> None:
                     "✅ Готово! Напоминание подключено.\n"
                     "Сообщение придёт в этот чат, когда матч начнётся."
                     + ("\n\n📢 Вы также подписаны на новости — /stop отменяет подписку." if new_sub else ""),
+                    keyboard=TV_MENU,
                 )
             else:
                 await send_message(
@@ -174,13 +210,16 @@ async def _handle_message(msg: dict) -> None:
                     "👋 Привет! Я присылаю уведомления о начале матчей и новости хоккея.\n\n"
                     "• Напоминания — на сайте: у матча нажмите «Напоминание»\n"
                     "• Новости канала приходят сюда автоматически\n"
+                    "• Подключение ТВ — кнопкой ниже\n"
                     "• Отписаться от новостей — /stop",
+                    keyboard=TV_MENU,
                 )
             else:
                 await send_message(
                     chat_id,
                     "Вы уже подписаны. Напоминания включаются на сайте: "
                     "у матча нажмите «Напоминание».",
+                    keyboard=TV_MENU,
                 )
         return
 
@@ -195,6 +234,18 @@ async def _handle_message(msg: dict) -> None:
             chat_id,
             "📢 Вы подписаны на новости." if new_sub else "Вы уже подписаны на новости.",
         )
+        return
+
+    if cmd == "/tvcode":
+        # выдать код вручную (только админ) — /tvcode [chat_id]
+        if not is_admin:
+            await send_message(chat_id, "Команда доступна только администратору.")
+            return
+        from app.api.tv_auth import issue_tv_code
+
+        target = parts[1] if len(parts) > 1 else str(chat_id)
+        code = issue_tv_code(target)
+        await send_message(chat_id, f"🔑 Код для chat_id {target}: {code}\n(одноразовый, лежит в tv_codes.json)")
         return
 
     if cmd in ("/help", "/news"):
@@ -213,7 +264,9 @@ async def _handle_message(msg: dict) -> None:
             chat_id,
             "Я присылаю уведомления о начале матчей и новости хоккея.\n"
             "Сайт: hockey-live.online\n"
+            "Подключение ТВ — кнопкой «Подключить ТВ» ниже\n"
             "Отписаться от новостей: /stop",
+            keyboard=TV_MENU,
         )
         return
 
@@ -225,7 +278,11 @@ async def _handle_message(msg: dict) -> None:
 
     await send_message(
         chat_id,
-        "Не понял команду. Доступно:\n/sub — подписаться на новости\n/stop — отписаться\n/help — помощь",
+        "Не понял команду. Доступно:\n"
+        + CONNECT_TV_BUTTON
+        + " — активация приложения на ТВ\n"
+        "/sub — подписаться на новости\n/stop — отписаться\n/help — помощь",
+        keyboard=TV_MENU,
     )
 
 
