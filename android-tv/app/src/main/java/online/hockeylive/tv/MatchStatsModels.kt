@@ -10,6 +10,7 @@ data class StatsMatchInfo(
     @SerialName("score_home") val scoreHome: Int = 0,
     @SerialName("score_away") val scoreAway: Int = 0,
     @SerialName("home_team_id") val homeTeamId: Int = 0,
+    @SerialName("away_team_id") val awayTeamId: Int = 0,
     val status: String = "",
 )
 

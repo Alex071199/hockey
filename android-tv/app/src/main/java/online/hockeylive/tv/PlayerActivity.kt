@@ -30,6 +30,7 @@ import coil.transform.CircleCropTransformation
 import kotlinx.coroutines.launch
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import java.net.URLEncoder
 
 class PlayerActivity : ComponentActivity() {
 
@@ -523,77 +524,24 @@ class PlayerActivity : ComponentActivity() {
             )
         }
 
+        val homeId = info?.homeTeamId ?: 0
+        val serverBase = AppSettings.serverUrl(this).trimEnd('/')
         if (s.goals.isNotEmpty()) {
             sectionTitle("Авторы шайб")
             val images = HashMap<String, String?>()
             for (pl in (s.rosters?.home ?: emptyList()) + (s.rosters?.away ?: emptyList())) {
                 if (pl.image != null) images[pl.name] = pl.image
             }
+            c.addView(teamsHeader(info?.home ?: "Домашняя", info?.away ?: "Гостевая"))
+            val colHome = goalColumn()
+            val colAway = goalColumn()
             for (g in s.goals) {
-                val row = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(0, dp(6), 0, dp(6))
-                }
-                row.addView(
-                    ImageView(this).apply {
-                        layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
-                            .apply { marginEnd = dp(16) }
-                        scaleType = ImageView.ScaleType.CENTER_CROP
-                        setBackgroundColor(0xFF222222.toInt())
-                        load(images[g.scorer]) {
-                            transformations(CircleCropTransformation())
-                        }
-                    },
-                )
-                val col = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    layoutParams = LinearLayout.LayoutParams(
-                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
-                    )
-                }
-                val meta = buildString {
-                    g.time?.takeIf { it.isNotBlank() }?.let { append(it) }
-                    g.score?.takeIf { it.isNotBlank() }?.let {
-                        if (isNotEmpty()) append("  ·  ")
-                        append(it)
-                    }
-                    if (g.period in 1..3) {
-                        if (isNotEmpty()) append("  ·  ")
-                        append("${g.period} период")
-                    }
-                }
-                if (meta.isNotBlank()) {
-                    col.addView(
-                        TextView(this).apply {
-                            text = meta
-                            setTextColor(0xFF888888.toInt())
-                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-                        },
-                    )
-                }
-                col.addView(
-                    TextView(this).apply {
-                        text = g.scorer
-                        setTextColor(0xFFFFFFFF.toInt())
-                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-                        typeface = Typeface.DEFAULT_BOLD
-                    },
-                )
-                val assists = g.assistants.filter { it.isNotBlank() }
-                if (assists.isNotEmpty()) {
-                    col.addView(
-                        TextView(this).apply {
-                            text = "Ассист: ${assists.joinToString(", ")}"
-                            setTextColor(0xFF888888.toInt())
-                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-                            setPadding(0, dp(2), 0, 0)
-                        },
-                    )
-                }
-                row.addView(col)
-                c.addView(row)
+                val target = if (g.teamId == homeId) colHome else colAway
+                target.addView(goalRow(g, images, serverBase))
             }
+            if (colHome.childCount == 0) colHome.addView(emptyColMarker())
+            if (colAway.childCount == 0) colAway.addView(emptyColMarker())
+            c.addView(twoColumns(colHome, colAway))
         }
 
         val hs = s.teamStats?.home
@@ -615,22 +563,16 @@ class PlayerActivity : ComponentActivity() {
 
         if (s.penalties.isNotEmpty()) {
             sectionTitle("Удаления")
+            c.addView(teamsHeader(info?.home ?: "Домашняя", info?.away ?: "Гостевая"))
+            val colHome = goalColumn()
+            val colAway = goalColumn()
             for (pen in s.penalties) {
-                val line = buildString {
-                    pen.time?.takeIf { it.isNotBlank() }?.let { append(it) }
-                    append(" · ${pen.minutes} мин")
-                    if (pen.reason.isNotBlank()) append(" · ${pen.reason}")
-                    if (pen.player.isNotBlank()) append(" — ${pen.player}")
-                }
-                c.addView(
-                    TextView(this).apply {
-                        text = line
-                        setTextColor(0xFFCCCCCC.toInt())
-                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                        setPadding(0, dp(5), 0, dp(5))
-                    },
-                )
+                val target = if (pen.teamId == homeId) colHome else colAway
+                target.addView(penaltyRow(pen))
             }
+            if (colHome.childCount == 0) colHome.addView(emptyColMarker())
+            if (colAway.childCount == 0) colAway.addView(emptyColMarker())
+            c.addView(twoColumns(colHome, colAway))
         }
 
         c.addView(
@@ -643,6 +585,132 @@ class PlayerActivity : ComponentActivity() {
             },
         )
     }
+
+    private fun teamsHeader(left: String, right: String): LinearLayout {
+        fun head(name: String) = TextView(this).apply {
+            text = name
+            setTextColor(0xFFFFFFFF.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setPadding(0, 0, 0, dp(8))
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(head(left))
+            addView(head(right))
+        }
+    }
+
+    private fun goalColumn() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+    }
+
+    private fun twoColumns(left: View, right: View): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(left)
+            addView(
+                View(this@PlayerActivity).apply {
+                    setBackgroundColor(0xFF222222.toInt())
+                    layoutParams = LinearLayout.LayoutParams(dp(1), LinearLayout.LayoutParams.MATCH_PARENT)
+                        .apply { setMargins(dp(8), 0, dp(8), 0) }
+                },
+            )
+            addView(right)
+        }
+
+    private fun emptyColMarker() = TextView(this).apply {
+        text = "—"
+        setTextColor(0xFF555555.toInt())
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+        gravity = Gravity.CENTER
+        setPadding(0, dp(8), 0, dp(8))
+    }
+
+    private fun goalRow(g: StatGoal, images: Map<String, String?>, serverBase: String): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(4), 0, dp(4))
+        }
+        val photoUrl = images[g.scorer]?.let {
+            "$serverBase/api/proxy/player-photo?url=${URLEncoder.encode(it, "UTF-8")}"
+        }
+        row.addView(
+            ImageView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(40), dp(40))
+                    .apply { marginEnd = dp(10) }
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                setBackgroundColor(0xFF222222.toInt())
+                load(photoUrl) {
+                    transformations(CircleCropTransformation())
+                }
+            },
+        )
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+            )
+        }
+        val meta = buildString {
+            g.time?.takeIf { it.isNotBlank() }?.let { append(it) }
+            g.score?.takeIf { it.isNotBlank() }?.let {
+                if (isNotEmpty()) append("  ·  ")
+                append(it)
+            }
+            if (g.period in 1..3) {
+                if (isNotEmpty()) append("  ·  ")
+                append("${g.period} период")
+            }
+        }
+        if (meta.isNotBlank()) {
+            col.addView(
+                TextView(this).apply {
+                    text = meta
+                    setTextColor(0xFF888888.toInt())
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                },
+            )
+        }
+        col.addView(
+            TextView(this).apply {
+                text = g.scorer
+                setTextColor(0xFFFFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                typeface = Typeface.DEFAULT_BOLD
+            },
+        )
+        val assists = g.assistants.filter { it.isNotBlank() }
+        if (assists.isNotEmpty()) {
+            col.addView(
+                TextView(this).apply {
+                    text = "Ассист: ${assists.joinToString(", ")}"
+                    setTextColor(0xFF888888.toInt())
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                    setPadding(0, dp(1), 0, 0)
+                },
+            )
+        }
+        row.addView(col)
+        return row
+    }
+
+    private fun penaltyRow(pen: StatPenalty): View =
+        TextView(this).apply {
+            text = buildString {
+                pen.time?.takeIf { it.isNotBlank() }?.let { append(it) }
+                append(" · ${pen.minutes} мин")
+                if (pen.reason.isNotBlank()) append(" · ${pen.reason}")
+                if (pen.player.isNotBlank()) append(" — ${pen.player}")
+            }
+            setTextColor(0xFFCCCCCC.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setPadding(0, dp(4), 0, dp(4))
+        }
 
     // Клавиши перехватываем ДО view hierarchy: WebView на livetv-источниках
     // съедает стрелки, если ждать onKeyDown (views получают событие первыми).

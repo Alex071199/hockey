@@ -1,6 +1,6 @@
 {
-  "version": "1.9",
-  "version_code": 10,
-  "apk_url": "https://github.com/Alex071199/hockey/releases/download/v10/HockeyLiveTV.apk",
-  "notes": "Исправлены трансляции YouTube (МХЛ) и Rutube (ВХЛ)"
+  "version": "1.10",
+  "version_code": 11,
+  "apk_url": "https://github.com/Alex071199/hockey/releases/download/v11/HockeyLiveTV.apk",
+  "notes": "QR-код активации, ввод кода с пульта, фото авторов шайб, голы и удаления по командам"
 }

@@ -707,6 +707,74 @@ async def test_fetch(url: str = Query(...)):
     }
 
 
+_PHOTO_HOSTS = {"khl.ru", "www.khl.ru", "img.khl.ru"}
+_photo_cache: dict[str, tuple[float, str, bytes]] = {}
+PHOTO_TTL = 86400
+
+_PHOTO_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+    "Referer": "https://www.khl.ru/",
+}
+
+
+def _photo_fetch_sync(url: str) -> bytes:
+    """Загрузка фото khl.ru: curl/urllib получают 403/зацикливание — только httpx."""
+    import httpx
+
+    try:
+        resp = httpx.get(
+            url, headers=_PHOTO_HEADERS, follow_redirects=True, timeout=20
+        )
+        if resp.status_code == 200:
+            return resp.content
+    except Exception as e:
+        logger.warning("photo fetch failed: %s", e)
+    return b""
+
+
+def _image_content_type(data: bytes) -> str | None:
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:4] == b"GIF8":
+        return "image/gif"
+    return None
+
+
+@router.get("/player-photo")
+async def player_photo(url: str = Query(..., description="Player photo URL (khl.ru)")):
+    """Фото игроков KHL: khl.ru отдаёт 403 не-браузерным UA — грузим сами и кэшируем."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or (parsed.hostname or "").lower() not in _PHOTO_HOSTS:
+        return Response(status_code=400)
+    hit = _photo_cache.get(url)
+    if hit and time.time() - hit[0] < PHOTO_TTL:
+        return Response(
+            content=hit[2],
+            media_type=hit[1],
+            headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=86400"},
+        )
+    loop = asyncio.get_event_loop()
+    data = await loop.run_in_executor(None, _photo_fetch_sync, url)
+    ctype = _image_content_type(data) if data else None
+    if not ctype:
+        return Response(status_code=404)
+    if len(_photo_cache) > 500:
+        _photo_cache.clear()
+    _photo_cache[url] = (time.time(), ctype, data)
+    return Response(
+        content=data,
+        media_type=ctype,
+        headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=86400"},
+    )
+
+
 @router.get("/hls-proxy")
 async def hls_proxy(url: str = Query(..., description="m3u8 URL to proxy")):
     loop = asyncio.get_event_loop()

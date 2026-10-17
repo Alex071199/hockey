@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 
 import httpx
 
@@ -53,7 +54,19 @@ async def send_message(
 
 # кнопка главного меню бота
 CONNECT_TV_BUTTON = "📺 Подключить ТВ"
+ISSUE_CODE_BUTTON = "🔑 Выдать код"
 TV_MENU: list[list[str]] = [[CONNECT_TV_BUTTON]]
+
+# админ в состоянии ожидания chat_id для выдачи кода: chat_id -> ts
+_tvcode_pending: dict[int, float] = {}
+TVCODE_TTL = 300
+
+
+def _menu(is_admin: bool) -> list[list[str]]:
+    """Главное меню: кнопка выдачи кода — только для админа."""
+    if is_admin:
+        return [[CONNECT_TV_BUTTON], [ISSUE_CODE_BUTTON]]
+    return [list(TV_MENU[0])]
 
 
 def tv_payment_link(chat_id: int) -> str:
@@ -175,13 +188,69 @@ async def _handle_message(msg: dict) -> None:
             "📺 Активация ТВ\n\n"
             "Чтобы приложение на телевизоре заработало, нужна активация — "
             "донат от 50 ₽ через ЮMoney.\n\n"
+            "💡 Эти 50 ₽ идут на оплату серверов для стабильной работы проекта — "
+            "сейчас все расходы покрываются личными деньгами.\n\n"
             "1. Откройте ссылку ниже и оплатите\n"
             "2. После оплаты в этот чат придёт 6-значный код\n"
             "3. Введите код в приложении на телевизоре\n\n"
             "⚠️ Код одноразовый — после активации перестаёт работать.",
-            keyboard=TV_MENU,
+            keyboard=_menu(is_admin),
         )
         await send_message(chat_id, tv_payment_link(chat_id))
+        return
+
+    # выдать код активации — только для админа
+    if text == ISSUE_CODE_BUTTON:
+        if not is_admin:
+            await send_message(chat_id, "Команда доступна только администратору.")
+            return
+        _tvcode_pending[chat_id] = time.time()
+        await send_message(
+            chat_id,
+            "🔑 Выдача кода активации ТВ\n\n"
+            f"Пришлите chat_id получателя (число).\n"
+            f"Чтобы выдать себе — ваш chat_id: {chat_id}\n\n"
+            "Отмена — /cancel",
+            keyboard=_menu(is_admin),
+        )
+        return
+
+    # админ ждёт chat_id после нажатия «Выдать код»
+    if is_admin and chat_id in _tvcode_pending:
+        if time.time() - _tvcode_pending[chat_id] > TVCODE_TTL:
+            _tvcode_pending.pop(chat_id, None)
+            await send_message(chat_id, "⏱ Время истекло — нажмите «Выдать код» заново.", keyboard=_menu(is_admin))
+            return
+        if cmd == "/cancel" or text.lower() in ("отмена", "cancel"):
+            _tvcode_pending.pop(chat_id, None)
+            await send_message(chat_id, "Отменено.", keyboard=_menu(is_admin))
+            return
+        if not (text.isdigit() or (text.startswith("-") and text[1:].isdigit())):
+            await send_message(chat_id, "chat_id должен быть числом. Отправьте число или /cancel.")
+            return
+        target = int(text)
+        _tvcode_pending.pop(chat_id, None)
+        from app.api.tv_auth import issue_tv_code
+
+        code = issue_tv_code(target)
+        if target == chat_id:
+            await send_message(chat_id, f"🔑 Ваш код: {code}\n\nОдноразовый — введите его на ТВ.", keyboard=_menu(is_admin))
+            return
+        delivered = await send_message(
+            target,
+            "🔑 Вам выдан код активации ТВ:\n\n"
+            f"{code}\n\n"
+            "Введите его в приложении на телевизоре. Код одноразовый.",
+        )
+        if delivered:
+            await send_message(chat_id, f"✅ Код отправлен в чат {target}:\n{code}", keyboard=_menu(is_admin))
+        else:
+            await send_message(
+                chat_id,
+                f"⚠️ Не удалось отправить сообщение в чат {target} (бот заблокирован?).\n"
+                f"Код для chat_id {target}:\n{code}",
+                keyboard=_menu(is_admin),
+            )
         return
 
     if cmd == "/start":
@@ -195,7 +264,7 @@ async def _handle_message(msg: dict) -> None:
                     "✅ Готово! Напоминание подключено.\n"
                     "Сообщение придёт в этот чат, когда матч начнётся."
                     + ("\n\n📢 Вы также подписаны на новости — /stop отменяет подписку." if new_sub else ""),
-                    keyboard=TV_MENU,
+                    keyboard=_menu(is_admin),
                 )
             else:
                 await send_message(
@@ -212,14 +281,14 @@ async def _handle_message(msg: dict) -> None:
                     "• Новости канала приходят сюда автоматически\n"
                     "• Подключение ТВ — кнопкой ниже\n"
                     "• Отписаться от новостей — /stop",
-                    keyboard=TV_MENU,
+                    keyboard=_menu(is_admin),
                 )
             else:
                 await send_message(
                     chat_id,
                     "Вы уже подписаны. Напоминания включаются на сайте: "
                     "у матча нажмите «Напоминание».",
-                    keyboard=TV_MENU,
+                    keyboard=_menu(is_admin),
                 )
         return
 
@@ -266,7 +335,7 @@ async def _handle_message(msg: dict) -> None:
             "Сайт: hockey-live.online\n"
             "Подключение ТВ — кнопкой «Подключить ТВ» ниже\n"
             "Отписаться от новостей: /stop",
-            keyboard=TV_MENU,
+            keyboard=_menu(is_admin),
         )
         return
 
@@ -282,7 +351,7 @@ async def _handle_message(msg: dict) -> None:
         + CONNECT_TV_BUTTON
         + " — активация приложения на ТВ\n"
         "/sub — подписаться на новости\n/stop — отписаться\n/help — помощь",
-        keyboard=TV_MENU,
+        keyboard=_menu(is_admin),
     )
 
 

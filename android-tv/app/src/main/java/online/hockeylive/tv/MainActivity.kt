@@ -32,6 +32,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -43,6 +47,8 @@ import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
@@ -182,92 +188,145 @@ fun AuthScreen(onActivated: () -> Unit) {
         }
     }
 
+    val qrImage = remember {
+        try {
+            val matrix = QRCodeWriter().encode(
+                "https://t.me/hockeylivenotificationbot",
+                BarcodeFormat.QR_CODE,
+                600,
+                600,
+            )
+            val bmp = android.graphics.Bitmap.createBitmap(
+                matrix.width, matrix.height, android.graphics.Bitmap.Config.ARGB_8888,
+            )
+            for (x in 0 until matrix.width) {
+                for (y in 0 until matrix.height) {
+                    bmp.setPixel(
+                        x, y,
+                        if (matrix.get(x, y)) android.graphics.Color.BLACK
+                        else android.graphics.Color.WHITE,
+                    )
+                }
+            }
+            bmp.asImageBitmap()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Theme.bg)
-            .padding(32.dp),
+            .padding(horizontal = 24.dp, vertical = 12.dp)
+            .onPreviewKeyEvent { e ->
+                if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                val kc = e.nativeKeyEvent.keyCode
+                val digit = when {
+                    kc in android.view.KeyEvent.KEYCODE_0..android.view.KeyEvent.KEYCODE_9 ->
+                        ('0'.code + (kc - android.view.KeyEvent.KEYCODE_0)).toChar()
+                    kc in android.view.KeyEvent.KEYCODE_NUMPAD_0..android.view.KeyEvent.KEYCODE_NUMPAD_9 ->
+                        ('0'.code + (kc - android.view.KeyEvent.KEYCODE_NUMPAD_0)).toChar()
+                    else -> null
+                }
+                when {
+                    digit != null -> {
+                        if (code.length < 6 && !busy) {
+                            code += digit
+                            status = null
+                        }
+                        true
+                    }
+                    kc == android.view.KeyEvent.KEYCODE_DEL -> {
+                        if (code.isNotEmpty()) code = code.dropLast(1)
+                        status = null
+                        true
+                    }
+                    kc == android.view.KeyEvent.KEYCODE_ENTER ||
+                        kc == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                        activate()
+                        true
+                    }
+                    else -> false
+                }
+            },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Image(
-            painter = painterResource(R.drawable.mainlogo),
-            contentDescription = "HOCKEY LIVE",
-            modifier = Modifier.size(72.dp),
-        )
-        Spacer(Modifier.height(12.dp))
         Text(
             text = "Активация приложения",
             color = Theme.text,
-            fontSize = 28.sp,
+            fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
         )
-        Spacer(Modifier.height(16.dp))
-        Column(modifier = Modifier.width(620.dp)) {
-            val steps = listOf(
-                "1. Откройте Telegram и найдите бота @hockeylivenotificationbot",
-                "2. Нажмите кнопку «Подключить ТВ»",
-                "3. Оплатите активацию от 50 ₽ — бот пришлёт 6-значный код",
-                "4. Введите код ниже и нажмите «Активировать»",
-            )
-            steps.forEach { s ->
+        Spacer(Modifier.height(12.dp))
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            if (qrImage != null) {
+                Box(
+                    modifier = Modifier
+                        .background(Color.White)
+                        .padding(6.dp),
+                ) {
+                    Image(
+                        bitmap = qrImage,
+                        contentDescription = "QR: открыть бота в Telegram",
+                        modifier = Modifier.size(112.dp),
+                    )
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(
-                    text = s,
+                    text = "Отсканируйте QR камерой телефона",
+                    color = Theme.text,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    text = "1. В боте нажмите «Подключить ТВ»",
                     color = Theme.textSecondary,
-                    fontSize = 15.sp,
-                    modifier = Modifier.padding(vertical = 3.dp),
+                    fontSize = 12.sp,
+                )
+                Text(
+                    text = "2. Оплатите 50 ₽ — придёт 6-значный код",
+                    color = Theme.textSecondary,
+                    fontSize = 12.sp,
+                )
+                Text(
+                    text = "3. Введите код ниже — кнопки или цифры с пульта",
+                    color = Theme.textSecondary,
+                    fontSize = 12.sp,
                 )
             }
         }
-        Spacer(Modifier.height(14.dp))
-        Surface(
-            onClick = {
-                runCatching {
-                    context.startActivity(
-                        Intent(
-                            Intent.ACTION_VIEW,
-                            android.net.Uri.parse("https://t.me/hockeylivenotificationbot"),
-                        ),
-                    )
-                }
-            },
-            colors = ClickableSurfaceDefaults.colors(
-                containerColor = Theme.cardHover,
-                focusedContainerColor = Theme.accent,
-            ),
-        ) {
-            Text(
-                text = "  Открыть бота @hockeylivenotificationbot  ",
-                color = Theme.text,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(vertical = 10.dp),
-            )
-        }
-        Spacer(Modifier.height(24.dp))
 
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Spacer(Modifier.height(14.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             repeat(6) { i ->
                 Box(
                     modifier = Modifier
-                        .width(52.dp)
-                        .height(64.dp)
+                        .width(46.dp)
+                        .height(52.dp)
                         .background(
                             if (i == code.length) Theme.cardHover else Theme.card,
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = if (i < code.length) code[i].toString() else " ",
+                        text = if (i < code.length) code[i].toString() else "•",
                         color = Theme.text,
-                        fontSize = 28.sp,
+                        fontSize = 24.sp,
                         fontWeight = FontWeight.Bold,
                     )
                 }
             }
         }
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(12.dp))
 
         val rows = listOf(
             listOf("1", "2", "3"),
@@ -298,7 +357,6 @@ fun AuthScreen(onActivated: () -> Unit) {
                                     }
                                 }
                             },
-                            enabled = isOk || isDel || code.length < 6,
                             colors = ClickableSurfaceDefaults.colors(
                                 containerColor = when {
                                     isOk -> Theme.accent
@@ -306,34 +364,31 @@ fun AuthScreen(onActivated: () -> Unit) {
                                     else -> Theme.cardHover
                                 },
                                 focusedContainerColor = if (isOk) Theme.accentHover else Theme.accent,
-                                disabledContainerColor = Theme.border,
                             ),
                         ) {
                             Text(
                                 text = if (busy && isOk) "…" else label,
                                 color = if (isOk) Color.White else Theme.text,
-                                fontSize = if (isOk) 16.sp else 20.sp,
+                                fontSize = if (isOk) 15.sp else 18.sp,
                                 fontWeight = FontWeight.Bold,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier
-                                    .width(if (isOk) 110.dp else 74.dp)
-                                    .padding(vertical = 16.dp),
+                                    .width(if (isOk) 96.dp else 64.dp)
+                                    .padding(vertical = 10.dp),
                             )
                         }
                     }
                 }
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(5.dp))
             }
         }
 
-        if (status != null) {
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = status!!,
-                color = Theme.accent,
-                fontSize = 15.sp,
-            )
-        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = status ?: "Кнопка OK или Enter на клавиатуре — активировать",
+            color = if (status != null) Theme.accent else Theme.textMuted,
+            fontSize = 13.sp,
+        )
     }
 }
 

@@ -13,8 +13,8 @@ android {
         applicationId = "online.hockeylive.tv"
         minSdk = 21
         targetSdk = 34
-        versionCode = 10
-        versionName = "1.9"
+        versionCode = 11
+        versionName = "1.10"
     }
 
     signingConfigs {
@@ -71,4 +71,5 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("io.coil-kt:coil:2.6.0")
+    implementation("com.google.zxing:core:3.5.3")
 }
