@@ -6,7 +6,16 @@ object AppSettings {
     private const val PREFS = "hockey_live_tv"
     private const val KEY_SERVER = "server_url"
     private const val KEY_AUTHORIZED = "tv_authorized"
+    private const val KEY_DEVICE = "device_id"
     const val DEFAULT_SERVER = "https://hockey-live-production-b0cc.up.railway.app"
+
+    /** Стабильный UUID устройства — для восстановления авторизации на сервере. */
+    fun deviceId(context: Context): String {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_DEVICE, null) ?: java.util.UUID.randomUUID()
+            .toString()
+            .also { prefs.edit().putString(KEY_DEVICE, it).apply() }
+    }
 
     fun serverUrl(context: Context): String =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

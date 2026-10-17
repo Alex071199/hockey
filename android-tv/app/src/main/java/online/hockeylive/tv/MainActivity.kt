@@ -75,6 +75,23 @@ class MainActivity : ComponentActivity() {
             val context = LocalContext.current
             var authorized by remember { mutableStateOf(AppSettings.isAuthorized(context)) }
 
+            // Восстановление авторизации с сервера (переустановка/очистка данных)
+            LaunchedEffect(Unit) {
+                if (!authorized) {
+                    try {
+                        val ok = ApiClient.isDeviceActivated(
+                            AppSettings.serverUrl(context),
+                            AppSettings.deviceId(context),
+                        )
+                        if (ok) {
+                            AppSettings.setAuthorized(context, true)
+                            authorized = true
+                        }
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+
             if (!authorized) {
                 AuthScreen(
                     onActivated = {
@@ -176,7 +193,11 @@ fun AuthScreen(onActivated: () -> Unit) {
         status = null
         scope.launch {
             try {
-                if (ApiClient.activateCode(AppSettings.serverUrl(context), code)) {
+                if (ApiClient.activateCode(
+                        AppSettings.serverUrl(context), code,
+                        AppSettings.deviceId(context),
+                    )
+                ) {
                     onActivated()
                     return@launch
                 }
@@ -265,18 +286,28 @@ fun AuthScreen(onActivated: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(18.dp),
             verticalAlignment = Alignment.Top,
         ) {
-            if (qrImage != null) {
-                Box(
-                    modifier = Modifier
-                        .background(Color.White)
-                        .padding(6.dp),
-                ) {
-                    Image(
-                        bitmap = qrImage,
-                        contentDescription = "QR: открыть бота в Telegram",
-                        modifier = Modifier.size(112.dp),
-                    )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (qrImage != null) {
+                    Box(
+                        modifier = Modifier
+                            .background(Color.White)
+                            .padding(6.dp),
+                    ) {
+                        Image(
+                            bitmap = qrImage,
+                            contentDescription = "QR: открыть бота в Telegram",
+                            modifier = Modifier.size(112.dp),
+                        )
+                    }
                 }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "@hockeylivenotificationbot",
+                    color = Theme.textSecondary,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                )
             }
             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(
@@ -291,7 +322,7 @@ fun AuthScreen(onActivated: () -> Unit) {
                     fontSize = 12.sp,
                 )
                 Text(
-                    text = "2. Оплатите 50 ₽ — придёт 6-значный код",
+                    text = "2. Оплатите активацию — придёт 6-значный код",
                     color = Theme.textSecondary,
                     fontSize = 12.sp,
                 )

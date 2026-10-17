@@ -1,6 +1,6 @@
 {
-  "version": "1.10",
-  "version_code": 11,
-  "apk_url": "https://github.com/Alex071199/hockey/releases/download/v11/HockeyLiveTV.apk",
-  "notes": "QR-код активации, ввод кода с пульта, фото авторов шайб, голы и удаления по командам"
+  "version": "1.11",
+  "version_code": 12,
+  "apk_url": "https://github.com/Alex071199/hockey/releases/download/v12/HockeyLiveTV.apk",
+  "notes": "Авторизация не сбрасывается после обновлений; ник бота на экране активации"
 }

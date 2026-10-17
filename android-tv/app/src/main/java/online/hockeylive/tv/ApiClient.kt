@@ -82,9 +82,9 @@ object ApiClient {
     }
 
     /** Активация по одноразовому 6-значному коду. true — ок; false — код не годится. */
-    suspend fun activateCode(server: String, code: String): Boolean =
+    suspend fun activateCode(server: String, code: String, deviceId: String): Boolean =
         withContext(Dispatchers.IO) {
-            val body = """{"code":"$code"}"""
+            val body = """{"code":"$code","device_id":"$deviceId"}"""
                 .toRequestBody("application/json".toMediaType())
             val req = Request.Builder()
                 .url("${server.trimEnd('/')}/api/tv/activate")
@@ -97,6 +97,20 @@ object ApiClient {
                     resp.code == 400 || resp.code == 410 -> false
                     else -> throw java.io.IOException("HTTP ${resp.code}")
                 }
+            }
+        }
+
+    /** Сервер знает это устройство? (восстановление авторизации после обновления) */
+    suspend fun isDeviceActivated(server: String, deviceId: String): Boolean =
+        withContext(Dispatchers.IO) {
+            val u = "${server.trimEnd('/')}/api/tv/status?device_id=$deviceId"
+            val resp = runCatching {
+                http.newCall(Request.Builder().url(u).build()).execute()
+            }.getOrNull() ?: return@withContext false
+            resp.use {
+                if (!it.isSuccessful) return@use false
+                val body = it.body?.string() ?: return@use false
+                body.contains("\"authorized\":true")
             }
         }
 }
