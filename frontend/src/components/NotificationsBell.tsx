@@ -69,7 +69,19 @@ export default function NotificationsBell() {
       const maxId = Math.max(...news.map((n) => n.id), seenId);
       setSeenId(maxId);
       localStorage.setItem(SEEN_KEY, String(maxId));
+      // сервер помечает просмотренными — через 24 часа они удалятся
+      fetch(`${API_URL}/api/news/seen`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ max_id: maxId }),
+      }).catch(() => {});
     }
+  }
+
+  function remove(id: number, e: React.MouseEvent) {
+    e.stopPropagation();
+    setNews((prev) => prev.filter((n) => n.id !== id));
+    fetch(`${API_URL}/api/news/${id}`, { method: "DELETE" }).catch(() => {});
   }
 
   return (
@@ -109,7 +121,7 @@ export default function NotificationsBell() {
               {news.map((n) => (
                 <li
                   key={n.id}
-                  className={`px-4 py-3 border-b border-hockey-border/60 last:border-b-0 ${
+                  className={`relative px-4 pr-9 py-3 border-b border-hockey-border/60 last:border-b-0 ${
                     n.id > seenId ? "bg-hockey-accent/5" : ""
                   }`}
                 >
@@ -119,10 +131,40 @@ export default function NotificationsBell() {
                   <span className="block mt-1.5 text-[11px] text-hockey-text-secondary">
                     {timeAgo(n.created_at)}
                   </span>
+                  <button
+                    onClick={(e) => remove(n.id, e)}
+                    aria-label="Удалить уведомление"
+                    title="Удалить"
+                    className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded-md text-hockey-text-muted hover:text-white hover:bg-white/10 transition-colors"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                      <path d="M18 6 6 18M6 6l12 12" />
+                    </svg>
+                  </button>
                 </li>
               ))}
             </ul>
           )}
+
+          <div className="h-2 bg-hockey-border/70 border-t border-hockey-border" />
+          <a
+            href="https://t.me/hockeylivenotificationbot"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2.5 px-4 py-3 text-sm text-hockey-text-secondary hover:text-white hover:bg-white/5 transition-colors"
+          >
+            <svg width="18" height="18" viewBox="0 0 256 256" preserveAspectRatio="xMidYMid" aria-hidden="true">
+              <defs>
+                <linearGradient id="tlg-a" x1="50%" x2="50%" y1="0%" y2="100%">
+                  <stop offset="0%" stopColor="#2AABEE" />
+                  <stop offset="100%" stopColor="#229ED9" />
+                </linearGradient>
+              </defs>
+              <path fill="url(#tlg-a)" d="M128 0C94.06 0 61.48 13.494 37.5 37.49A128.038 128.038 0 0 0 0 128c0 33.934 13.5 66.514 37.5 90.51C61.48 242.506 94.06 256 128 256s66.52-13.494 90.5-37.49c24-23.996 37.5-56.576 37.5-90.51 0-33.934-13.5-66.514-37.5-90.51C194.52 13.494 161.94 0 128 0Z" />
+              <path fill="#FFF" d="M57.94 126.648c37.32-16.256 62.2-26.974 74.64-32.152 35.56-14.786 42.94-17.354 47.76-17.441 1.06-.017 3.42.245 4.96 1.49 1.28 1.05 1.64 2.47 1.82 3.467.16.996.38 3.266.2 5.038-1.92 20.24-10.26 69.356-14.5 92.026-1.78 9.592-5.32 12.808-8.74 13.122-7.44.684-13.08-4.912-20.28-9.63-11.26-7.386-17.62-11.982-28.56-19.188-12.64-8.328-4.44-12.906 2.76-20.386 1.88-1.958 34.64-31.748 35.26-34.45.08-.338.16-1.598-.6-2.262-.74-.666-1.84-.438-2.64-.258-1.14.256-19.12 12.152-54 35.686-5.1 3.508-9.72 5.218-13.88 5.128-4.56-.098-13.36-2.584-19.9-4.708-8-2.606-14.38-3.984-13.82-8.41.28-2.304 3.46-4.662 9.52-7.072Z" />
+            </svg>
+            <span>Наш Telegram-бот</span>
+          </a>
         </div>
       )}
     </div>

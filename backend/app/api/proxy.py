@@ -1,4 +1,6 @@
 import asyncio
+import json
+import logging
 import re
 import shutil
 import subprocess
@@ -11,6 +13,8 @@ from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse, Response
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/proxy", tags=["proxy"])
 
@@ -141,6 +145,196 @@ else if(video.canPlayType('application/vnd.apple.mpegurl')){{video.src=src;video
 </script>
 </body>
 </html>"""
+
+
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
+
+def _media_player_page(src: str) -> str:
+    """Плеер для резолвленных embed: m3u8 через hls-proxy (CORS), mp4 напрямую."""
+    proxy_base = settings.PUBLIC_API_URL.rstrip("/")
+    if ".m3u8" in src:
+        play_url = f"{proxy_base}/api/proxy/hls-proxy?url={src}"
+    else:
+        play_url = src
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="referrer" content="no-referrer">
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+<style>
+  body {{ margin:0; padding:0; background:#000; overflow:hidden; }}
+  video {{ width:100vw; height:100vh; object-fit:contain; display:block; }}
+</style>
+</head>
+<body>
+<video id="v" controls autoplay playsinline></video>
+<script>
+var video=document.getElementById('v');
+var src='{play_url}';
+if(src.indexOf('.m3u8')>=0){{
+  if(Hls.isSupported()){{var hls=new Hls();hls.loadSource(src);hls.attachMedia(video);hls.on(Hls.Events.MANIFEST_PARSED,function(){{video.play()}});}}
+  else if(video.canPlayType('application/vnd.apple.mpegurl')){{video.src=src;video.play();}}
+}}else{{video.src=src;video.play();}}
+</script>
+</body>
+</html>"""
+
+
+def _post_json_sync(url: str, payload: dict) -> dict | None:
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": _BROWSER_UA,
+                "Accept-Language": "ru-RU,ru;q=0.9",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8", errors="ignore"))
+    except Exception:
+        return None
+
+
+def _youtube_video_id(url: str) -> str:
+    m = re.search(r"youtube\.com/embed/([\w-]{6,})", url)
+    if not m:
+        m = re.search(r"youtu\.be/([\w-]{6,})", url)
+    return m.group(1) if m else ""
+
+
+async def _resolve_youtube(url: str) -> str | None:
+    """Embed YouTube → HLS-манифест (live) или mp4 (VOD) через Innertube API."""
+    vid = _youtube_video_id(url)
+    if not vid:
+        return None
+    cache_key = f"yt_embed|{vid}"
+    cached = _cache.get(cache_key)
+    if cached and time.time() - cached[0] < 300:
+        return cached[1]
+
+    # разные клиенты innertube: WEB иногда отдаёт UNPLAYABLE без cookies,
+    # ANDROID/IOS/TVHTML5 — чаще отдают потоки напрямую
+    clients = [
+        ("WEB", "2.20260101.01.00", {}),
+        ("ANDROID", "20.10.38", {"androidSdkVersion": 30}),
+        ("IOS", "20.10.4", {"deviceModel": "iPhone14,3", "osName": "iPhone", "osVersion": "16.0"}),
+        ("TVHTML5", "7.20251001.15.00", {}),
+    ]
+
+    def _call(client_name: str, version: str, extra: dict) -> dict | None:
+        client = {"clientName": client_name, "clientVersion": version, "hl": "ru", "gl": "RU"}
+        client.update(extra)
+        return _post_json_sync(
+            "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+            {
+                "context": {"client": client},
+                "videoId": vid,
+                "contentCheckOk": True,
+                "racyCheckOk": True,
+                "playbackContext": {
+                    "contentPlaybackContext": {"html5Preference": "HTML5_PREF_WANTS"}
+                },
+            },
+        )
+
+    loop = asyncio.get_event_loop()
+    src: str | None = None
+    for client_name, version, extra in clients:
+        data = await loop.run_in_executor(None, _call, client_name, version, extra)
+        if not data:
+            logger.warning("youtube resolve %s: %s no response", vid, client_name)
+            continue
+        streaming = data.get("streamingData") or {}
+        candidate = streaming.get("hlsManifestUrl")
+        if not candidate:
+            for fmt in reversed(streaming.get("formats") or []):
+                if fmt.get("url"):
+                    candidate = fmt["url"]
+                    break
+        status = (data.get("playabilityStatus") or {}).get("status")
+        logger.warning(
+            "youtube resolve %s via %s: status=%s got=%s",
+            vid, client_name, status, bool(candidate),
+        )
+        if candidate:
+            src = candidate
+            break
+
+    if not src:
+        return None
+    _cache[cache_key] = (time.time(), src)
+    return src
+
+
+def _rutube_video_id(url: str) -> str:
+    m = re.search(r"rutube\.ru/play/embed/([\w-]+)", url)
+    return m.group(1) if m else ""
+
+
+async def _resolve_rutube(url: str) -> str | None:
+    """Embed Rutube → HLS из play/options (VOD: video_balancer, live: live_streams)."""
+    vid = _rutube_video_id(url)
+    if not vid:
+        return None
+    cache_key = f"rt_embed|{vid}"
+    cached = _cache.get(cache_key)
+    if cached and time.time() - cached[0] < 300:
+        return cached[1]
+
+    loop = asyncio.get_event_loop()
+    body = await loop.run_in_executor(
+        None,
+        _fetch_sync,
+        f"https://rutube.ru/api/play/options/{vid}/",
+        2,
+        "https://rutube.ru/",
+    )
+    if not body:
+        logger.warning("rutube resolve %s: empty response", vid)
+        return None
+    try:
+        info = json.loads(body)
+    except Exception:
+        logger.warning("rutube resolve %s: bad json", vid)
+        return None
+
+    src: str | None = None
+    vb = info.get("video_balancer")
+    if isinstance(vb, dict):
+        src = vb.get("m3u8") or vb.get("m3u8_m4s")
+    elif isinstance(vb, str):
+        src = vb
+    if not src:
+        options = info.get("video_balancer_options") or []
+        for opt in options:
+            if isinstance(opt, dict) and opt.get("src"):
+                src = opt["src"]
+                break
+    if not src:
+        # live-стримы: подписанный HLS на сутки
+        for item in (info.get("live_streams") or {}).get("hls") or []:
+            if item.get("url"):
+                src = item["url"]
+                break
+    logger.warning(
+        "rutube resolve %s: is_live=%s balancer=%s live_streams=%s got=%s",
+        vid,
+        info.get("stream_type") == "stream_push",
+        bool(vb),
+        bool(info.get("live_streams")),
+        bool(src),
+    )
+    if not src:
+        return None
+    _cache[cache_key] = (time.time(), src)
+    return src
 
 
 def _direct_frame_page(player_url: str, referrer: str = "https://livetv.sx/") -> str:
@@ -427,6 +621,20 @@ async def _resolve_livetv_player(webplayer_url: str) -> str | None:
 
 @router.get("/stream")
 async def proxy_stream(url: str = Query(..., description="Stream page URL")):
+    # embed YouTube/Rutube: системный WebView на TV-боксах их не проигрывает —
+    # резолвим в чистый HLS/mp4-плеер (иначе чёрный экран на МХЛ/ВХЛ)
+    if "youtube.com/embed/" in url or "youtu.be/" in url:
+        src = await _resolve_youtube(url)
+        if src:
+            return HTMLResponse(content=_media_player_page(src), media_type="text/html; charset=utf-8")
+        return HTMLResponse(_failed_page(), media_type="text/html; charset=utf-8", status_code=502)
+
+    if "rutube.ru/play/embed/" in url:
+        src = await _resolve_rutube(url)
+        if src:
+            return HTMLResponse(content=_media_player_page(src), media_type="text/html; charset=utf-8")
+        return HTMLResponse(_failed_page(), media_type="text/html; charset=utf-8", status_code=502)
+
     is_livetv = "livetv903.me" in url or "livetv.sx" in url or "livetv904.me" in url
     is_onsport = "onsport365.live" in url or "sportplustv.live" in url
     is_m3u8 = url.endswith(".m3u8") or ".m3u8?" in url

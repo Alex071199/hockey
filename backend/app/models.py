@@ -67,3 +67,5 @@ class News(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     text = Column(String)
     created_at = Column(DateTime, default=func.now())
+    # момент, когда колокольчик открыл пользователь (для TTL 24ч после просмотра)
+    last_seen_at = Column(DateTime, nullable=True)

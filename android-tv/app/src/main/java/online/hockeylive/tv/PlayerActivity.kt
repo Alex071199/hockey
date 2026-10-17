@@ -294,6 +294,9 @@ class PlayerActivity : ComponentActivity() {
         "dynbetray.net", "varline.store", "wideiptv.top", "vdocity.com",
         "embedded.slevel.ru", "videocdn", "red.sport", "onhockey.tv",
         "livetv903.me", "livetv.sx", "livetv904.me", "/cdnlivetv",
+        // embed youtube/rutube backend резолвит в чистый HLS/mp4-плеер:
+        // системный WebView на ТВ их embed не воспроизводит
+        "youtube.com/embed", "rutube.ru/play/embed",
     ).any { it in url }
 
     private fun startWebView(url: String, title: String) {
@@ -304,18 +307,19 @@ class PlayerActivity : ComponentActivity() {
         // Как на сайте: для проксируемых источников грузим не страницу
         // провайдера, а наш /api/proxy/stream — там backend вычищает
         // интерфейс и отдаёт чистый плеер.
-        var finalUrl = if (needsProxy(url)) {
+        val proxied = needsProxy(url)
+        var finalUrl = if (proxied) {
             val server = AppSettings.serverUrl(this).trimEnd('/')
             "$server/api/proxy/stream?url=" +
                 java.net.URLEncoder.encode(url, "UTF-8")
         } else {
             url
         }
-        if (url.contains("youtube.com/embed/")) {
+        if (!proxied && url.contains("youtube.com/embed/")) {
             val sep = if (finalUrl.contains("?")) "&" else "?"
             finalUrl = finalUrl + sep + "autoplay=1&rel=0&playsinline=1"
         }
-        if (url.contains("rutube.ru/play/embed/")) {
+        if (!proxied && url.contains("rutube.ru/play/embed/")) {
             finalUrl = finalUrl + "?autoplay=1"
         }
         webView?.loadUrl(finalUrl)

@@ -70,7 +70,7 @@ function StatsContent() {
           </div>
         )}
 
-        {data && <MatchStats data={data} />}
+        {data && <MatchStats data={data} tabs />}
       </div>
     </div>
   );

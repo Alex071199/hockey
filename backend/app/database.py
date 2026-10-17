@@ -66,6 +66,11 @@ def _add_missing_columns(bind) -> None:
         if "message" not in dexisting:
             additions.append("ALTER TABLE donations ADD COLUMN message VARCHAR")
 
+    if "news" in tables:
+        nexisting = {col["name"] for col in inspector.get_columns("news")}
+        if "last_seen_at" not in nexisting:
+            additions.append("ALTER TABLE news ADD COLUMN last_seen_at DATETIME")
+
     for stmt in additions:
         try:
             bind.execute(text(stmt))

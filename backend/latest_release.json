@@ -1,6 +1,6 @@
 {
-  "version": "1.8",
-  "version_code": 9,
-  "apk_url": "https://github.com/Alex071199/hockey/releases/download/v9/HockeyLiveTV.apk",
-  "notes": "Активация ТВ: код из бота после доната от 50 рублей"
+  "version": "1.9",
+  "version_code": 10,
+  "apk_url": "https://github.com/Alex071199/hockey/releases/download/v10/HockeyLiveTV.apk",
+  "notes": "Исправлены трансляции YouTube (МХЛ) и Rutube (ВХЛ)"
 }

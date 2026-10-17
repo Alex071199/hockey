@@ -293,7 +293,10 @@ export default function MatchStats({ data, tabs = false }: { data: MatchStatsDat
   const hasRosters = !!(
     data.rosters && (data.rosters.home.length > 0 || data.rosters.away.length > 0)
   );
-  const showTabs = tabs && hasRosters;
+  // вкладки всегда при tabs=true: «Статистика» / «Составы» вместо секций подряд
+  const showTabs = tabs;
+  const goals = data.goals ?? [];
+  const penalties = data.penalties ?? [];
 
   const statsSections = (
     <>
@@ -308,40 +311,54 @@ export default function MatchStats({ data, tabs = false }: { data: MatchStatsDat
         </div>
       </section>
 
-      {data.goals.length > 0 && (
+      {goals.length > 0 && (
         <section className="glass rounded-2xl p-4 sm:p-6">
           <h3 className="text-sm font-extrabold uppercase tracking-wide mb-3">Голы</h3>
-          <GoalScorers goals={data.goals} homeTeamId={m.home_team_id} awayTeamId={m.away_team_id} homeName={m.home} awayName={m.away} />
+          <GoalScorers goals={goals} homeTeamId={m.home_team_id} awayTeamId={m.away_team_id} homeName={m.home} awayName={m.away} />
         </section>
       )}
 
-      {data.penalties.length > 0 && (
+      {penalties.length > 0 && (
         <section className="glass rounded-2xl p-4 sm:p-6">
           <h3 className="text-sm font-extrabold uppercase tracking-wide mb-3">Штрафы</h3>
-          <PenaltiesList penalties={data.penalties} homeTeamId={m.home_team_id} homeName={m.home} awayName={m.away} />
+          <PenaltiesList penalties={penalties} homeTeamId={m.home_team_id} homeName={m.home} awayName={m.away} />
         </section>
       )}
     </>
   );
 
-  const rostersSection = hasRosters && (
+  const rostersSection = (
     <section className="glass rounded-2xl p-4 sm:p-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
-        <div>
-          <div className="flex items-center gap-2 mb-3">
-            <span className="w-2 h-2 rounded-full" style={{ background: "#e11d48" }} />
-            <p className="text-xs font-extrabold uppercase tracking-wide truncate">{m.home}</p>
+      {hasRosters ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="w-2 h-2 rounded-full" style={{ background: "#e11d48" }} />
+              <p className="text-xs font-extrabold uppercase tracking-wide truncate">{m.home}</p>
+            </div>
+            {data.rosters && data.rosters.home.length > 0 ? (
+              <RosterList players={data.rosters.home} accent="#e11d48" />
+            ) : (
+              <p className="text-sm text-hockey-text-muted py-4">Состав недоступен</p>
+            )}
           </div>
-          <RosterList players={data.rosters!.home} accent="#e11d48" />
-        </div>
-        <div>
-          <div className="flex items-center gap-2 mb-3">
-            <span className="w-2 h-2 rounded-full" style={{ background: "#ffffff" }} />
-            <p className="text-xs font-extrabold uppercase tracking-wide truncate">{m.away}</p>
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="w-2 h-2 rounded-full" style={{ background: "#ffffff" }} />
+              <p className="text-xs font-extrabold uppercase tracking-wide truncate">{m.away}</p>
+            </div>
+            {data.rosters && data.rosters.away.length > 0 ? (
+              <RosterList players={data.rosters.away} accent="#ffffff" />
+            ) : (
+              <p className="text-sm text-hockey-text-muted py-4">Состав недоступен</p>
+            )}
           </div>
-          <RosterList players={data.rosters!.away} accent="#ffffff" />
         </div>
-      </div>
+      ) : (
+        <p className="text-center text-sm text-hockey-text-secondary py-6">
+          Составы недоступны для этого матча
+        </p>
+      )}
     </section>
   );
 
