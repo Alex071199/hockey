@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContent {
             val context = LocalContext.current
             var matches by remember { mutableStateOf<List<Match>>(emptyList()) }
@@ -163,7 +164,14 @@ fun SourceChoiceDialog(match: Match, onChoice: (StreamUrl) -> Unit, onDismiss: (
                 fontSize = 13.sp,
             )
             Spacer(Modifier.height(16.dp))
+            var otherNum = 0
             sources.forEachIndexed { index, src ->
+                val label = if (src.source.equals("prime", true)) {
+                    "Прайм"
+                } else {
+                    otherNum++
+                    "Источник $otherNum"
+                }
                 Surface(
                     onClick = { onChoice(src) },
                     colors = ClickableSurfaceDefaults.colors(
@@ -184,7 +192,7 @@ fun SourceChoiceDialog(match: Match, onChoice: (StreamUrl) -> Unit, onDismiss: (
                         )
                         Spacer(Modifier.width(10.dp))
                         Text(
-                            text = src.displayName,
+                            text = label,
                             color = Theme.text,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Medium,

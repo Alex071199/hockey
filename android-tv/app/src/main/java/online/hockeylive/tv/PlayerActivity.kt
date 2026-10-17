@@ -41,6 +41,7 @@ class PlayerActivity : ComponentActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         val json = intent.getStringExtra(EXTRA_MATCH_JSON)
         match = try {
@@ -64,6 +65,8 @@ class PlayerActivity : ComponentActivity() {
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
             settings.setSupportMultipleWindows(false)
+            settings.userAgentString =
+                "Mozilla/5.0 (Linux; Android 12; SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             visibility = View.GONE
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = false
@@ -146,7 +149,14 @@ class PlayerActivity : ComponentActivity() {
         playerView?.visibility = View.VISIBLE
         webView?.visibility = View.GONE
         try {
-            val p = ExoPlayer.Builder(this).build()
+            val httpFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+                .setUserAgent("Mozilla/5.0 (Linux; Android 12; SM-T220) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .setConnectTimeoutMs(15_000)
+                .setReadTimeoutMs(20_000)
+                .setAllowCrossProtocolRedirects(true)
+            val p = ExoPlayer.Builder(this)
+                .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(httpFactory))
+                .build()
             player = p
             playerView?.player = p
             p.addListener(object : Player.Listener {
@@ -154,7 +164,6 @@ class PlayerActivity : ComponentActivity() {
                     if (isPlaying) hideStatus()
                 }
                 override fun onPlayerError(error: PlaybackException) {
-                    // Пробуем следующий источник вместо ошибки
                     nextSource(error.errorCodeName)
                 }
             })
