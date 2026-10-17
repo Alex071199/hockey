@@ -1,6 +1,6 @@
 {
-  "version": "1.6",
-  "version_code": 7,
-  "apk_url": "https://github.com/Alex071199/hockey/releases/download/v7/HockeyLiveTV.apk",
-  "notes": "Статистика работает на всех источниках + подсказка о стрелке вниз"
+  "version": "1.7",
+  "version_code": 8,
+  "apk_url": "https://github.com/Alex071199/hockey/releases/download/v8/HockeyLiveTV.apk",
+  "notes": "Фикс: статистика по стрелке вниз на всех источниках (включая livetv)"
 }

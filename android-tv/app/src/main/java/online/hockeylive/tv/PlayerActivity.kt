@@ -664,7 +664,6 @@ class PlayerActivity : ComponentActivity() {
             } else if (
                 event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN &&
                 match != null &&
-                player != null &&
                 playerView?.isControllerFullyVisible != true
             ) {
                 openStats()
