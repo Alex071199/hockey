@@ -332,7 +332,16 @@ async def _win_stream(
         url = embed
     else:
         return []
-    return [{"url": url, "quality": "auto", "source": "prime"}]
+    # iframe не всегда наш HLS: youtube/vk/rutube-embed — это не «прайм»,
+    # иначе приложение поднимает его первым и висит на заблокированном плеере
+    source = "prime"
+    if "youtube" in url or "youtu.be" in url:
+        source = "youtube"
+    elif "rutube" in url:
+        source = "rutube"
+    elif "vk.com" in url or "vkvideo" in url:
+        source = "vk"
+    return [{"url": url, "quality": "auto", "source": source}]
 
 
 def _win_status(item: dict, snap: dict) -> str:
@@ -983,6 +992,66 @@ async def warm_prime_states() -> None:
             logger.warning("PRIME warmup %s failed: %s", win_id, e)
 
 
+async def refresh_live_stream_urls() -> None:
+    """Подписанные sportplustv-ссылки (VHL, sportvideodata.com) протухают
+    за считанные минуты — обновляем detail live-матчей каждые 60 секунд,
+    иначе веб и приложение получают 404."""
+    from app.scraper.sportplustv import _fetch_match_detail
+
+    async with async_session() as db:
+        res = await db.execute(
+            select(Match.id, Match.sp_match_id, Match.stream_urls)
+            .where(Match.status == "live", Match.sp_match_id.is_not(None))
+        )
+        rows = res.all()
+    if not rows:
+        return
+
+    sem = asyncio.Semaphore(4)
+
+    async def _fetch(match_id: int, sp_id: int):
+        async with sem:
+            try:
+                return match_id, await _fetch_match_detail(sp_id)
+            except Exception as e:
+                logger.warning("SportPlusTV refresh %s failed: %s", sp_id, e)
+                return match_id, None
+
+    results = await asyncio.gather(
+        *(_fetch(r.id, r.sp_match_id) for r in rows)
+    )
+
+    updates: list[tuple[int, list[dict], int | None, int | None]] = []
+    for row, detail in results:
+        if not detail or not detail.get("streams"):
+            continue
+        kept = [
+            s for s in (row.stream_urls or [])
+            if s.get("source") not in SP_STREAM_SOURCES
+        ]
+        updates.append((
+            row.id,
+            list(detail["streams"]) + kept,
+            detail.get("home_score"),
+            detail.get("away_score"),
+        ))
+    if not updates:
+        return
+
+    async with async_session() as db:
+        for mid, urls, hs, aws in updates:
+            m = await db.get(Match, mid)
+            if not m:
+                continue
+            m.stream_urls = urls
+            if hs is not None:
+                m.home_score = hs
+            if aws is not None:
+                m.away_score = aws
+        await db.commit()
+    logger.info("SportPlusTV refresh: updated %d live match(es)", len(updates))
+
+
 async def force_upcoming_sources() -> None:
     """Если матч скоро начаться/уже начался, а источников нет — скрейп немедленно."""
     if time.time() - _last_scrape_at < 45:
@@ -1313,6 +1382,14 @@ def setup_scheduler() -> None:
         "interval",
         seconds=60,
         id="warm_prime_states",
+        replace_existing=True,
+        max_instances=1,
+    )
+    scheduler.add_job(
+        refresh_live_stream_urls,
+        "interval",
+        seconds=60,
+        id="refresh_live_stream_urls",
         replace_existing=True,
         max_instances=1,
     )

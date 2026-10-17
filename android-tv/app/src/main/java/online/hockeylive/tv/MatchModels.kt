@@ -11,7 +11,13 @@ data class StreamUrl(
     val source: String = "",
 ) {
     val isHls: Boolean
-        get() = url.contains(".m3u8") || url.contains("stream.m3u8")
+        get() {
+            val u = url.lowercase()
+            if (u.contains(".m3u8")) return true
+            // sportplustv отдаёт HLS по «голым» ссылкам без расширения
+            if (u.contains("sportvideodata") || u.contains("/hls/")) return true
+            return false
+        }
 
     val displayName: String
         get() = when {

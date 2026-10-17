@@ -38,6 +38,10 @@ class PlayerActivity : ComponentActivity() {
     private var sources: List<StreamUrl> = emptyList()
     private var sourceIndex: Int = -1
 
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var webTimeout: Runnable? = null
+    private var changingSource = false
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,10 +77,33 @@ class PlayerActivity : ComponentActivity() {
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     hideStatus()
                 }
+
+                override fun onReceivedError(
+                    view: WebView,
+                    request: WebResourceRequest,
+                    error: android.webkit.WebResourceError,
+                ) {
+                    if (request.isForMainFrame) {
+                        nextSource("web_error ${error.errorCode}")
+                    }
+                }
+
+                override fun onReceivedHttpError(
+                    view: WebView,
+                    request: WebResourceRequest,
+                    errorResponse: android.webkit.WebResourceResponse,
+                ) {
+                    if (request.isForMainFrame && errorResponse.statusCode in 400..599) {
+                        nextSource("http_${errorResponse.statusCode}")
+                    }
+                }
             }
             webChromeClient = object : WebChromeClient() {
                 override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                    if (newProgress >= 60) hideStatus()
+                    if (newProgress >= 60) {
+                        hideStatus()
+                        cancelWebTimeout()
+                    }
                 }
             }
         }
@@ -133,15 +160,26 @@ class PlayerActivity : ComponentActivity() {
 
     // Фоллбэк: пробуем следующий источник
     private fun nextSource(reason: String) {
+        if (changingSource) return
+        changingSource = true
         val prev = sourceIndex
         sourceIndex++
         if (sourceIndex in sources.indices) {
+            cancelWebTimeout()
+            webView?.stopLoading()
             releasePlayer()
             playCurrent()
+            mainHandler.postDelayed({ changingSource = false }, 1500)
         } else {
             sourceIndex = prev
+            changingSource = false
             showError("Источник недоступен ($reason).\nВсе источники перепробованы.")
         }
+    }
+
+    private fun cancelWebTimeout() {
+        webTimeout?.let { mainHandler.removeCallbacks(it) }
+        webTimeout = null
     }
 
     private fun startExoPlayer(url: String, title: String, src: StreamUrl) {
@@ -188,7 +226,11 @@ class PlayerActivity : ComponentActivity() {
             finalUrl = url + "?autoplay=1"
         }
         webView?.loadUrl(finalUrl)
-        statusText?.postDelayed({ hideStatus() }, 15000)
+        // Если страница не дала плеер за 25 секунд — пробуем следующий источник
+        cancelWebTimeout()
+        val timeout = Runnable { nextSource("web_timeout") }
+        webTimeout = timeout
+        mainHandler.postDelayed(timeout, 25_000)
     }
 
     private fun showStatus(text: String) {
@@ -251,6 +293,7 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        cancelWebTimeout()
         releasePlayer()
         webView?.destroy()
         webView = null
