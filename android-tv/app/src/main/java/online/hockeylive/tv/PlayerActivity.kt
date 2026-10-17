@@ -3,7 +3,10 @@ package online.hockeylive.tv
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Typeface
 import android.os.Bundle
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.webkit.WebChromeClient
@@ -11,13 +14,20 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import coil.load
+import coil.transform.CircleCropTransformation
+import kotlinx.coroutines.launch
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
@@ -41,6 +51,13 @@ class PlayerActivity : ComponentActivity() {
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var webTimeout: Runnable? = null
     private var changingSource = false
+
+    // Overlay статистики (стрелка вниз на пульте)
+    private var statsRoot: FrameLayout? = null
+    private var statsScroll: ScrollView? = null
+    private var statsContainer: LinearLayout? = null
+    private var statsVisible = false
+    private var statsRefresh: Runnable? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -119,6 +136,33 @@ class PlayerActivity : ComponentActivity() {
             FrameLayout.LayoutParams.WRAP_CONTENT,
         ).apply { gravity = android.view.Gravity.CENTER }
         root.addView(status, statusParams)
+
+        // Overlay статистики — поверх плеера, открывается стрелкой вниз
+        val statsLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(32), dp(24), dp(32), dp(24))
+        }
+        val statsScroller = ScrollView(this).apply {
+            isFillViewport = true
+            addView(statsLayout)
+        }
+        val statsOverlay = FrameLayout(this).apply {
+            setBackgroundColor(0xF20A0A0A.toInt())
+            addView(
+                statsScroller,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            )
+            visibility = View.GONE
+        }
+        root.addView(
+            statsOverlay,
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT,
+        )
+        statsRoot = statsOverlay
+        statsScroll = statsScroller
+        statsContainer = statsLayout
 
         setContentView(root)
         playerView = pv
@@ -270,7 +314,314 @@ class PlayerActivity : ComponentActivity() {
         showStatus(text)
     }
 
+    // ---------- Статистика матча (стрелка вниз на пульте) ----------
+
+    private fun dp(v: Int): Int =
+        (v * resources.displayMetrics.density).toInt()
+
+    private fun openStats() {
+        val m = match ?: return
+        statsVisible = true
+        statsRoot?.visibility = View.VISIBLE
+        statsScroll?.scrollTo(0, 0)
+        renderMessage("Загрузка статистики…")
+        loadStats()
+
+        statsRefresh?.let { mainHandler.removeCallbacks(it) }
+        if (m.isLive) {
+            val r = object : Runnable {
+                override fun run() {
+                    if (statsVisible) {
+                        loadStats()
+                        mainHandler.postDelayed(this, 60_000)
+                    }
+                }
+            }
+            statsRefresh = r
+            mainHandler.postDelayed(r, 60_000)
+        }
+    }
+
+    private fun closeStats() {
+        statsVisible = false
+        statsRoot?.visibility = View.GONE
+        statsRefresh?.let { mainHandler.removeCallbacks(it) }
+        statsRefresh = null
+    }
+
+    private fun loadStats() {
+        val m = match ?: return
+        lifecycleScope.launch {
+            val server = AppSettings.serverUrl(this@PlayerActivity)
+            val stats = ApiClient.fetchMatchStats(
+                server, m.teamHome, m.teamAway, m.datetimeUtc.take(10), live = m.isLive,
+            )
+            if (!statsVisible) return@launch
+            if (stats == null) {
+                renderMessage("Статистика недоступна\nдля этого матча")
+            } else {
+                renderStats(stats)
+            }
+        }
+    }
+
+    private fun renderMessage(text: String) {
+        val c = statsContainer ?: return
+        c.removeAllViews()
+        c.addView(
+            TextView(this).apply {
+                this.text = text
+                setTextColor(0xFF888888.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+                gravity = Gravity.CENTER
+                setPadding(0, dp(80), 0, 0)
+            },
+        )
+    }
+
+    private fun sectionTitle(text: String) {
+        statsContainer?.addView(
+            TextView(this).apply {
+                this.text = text.uppercase()
+                setTextColor(0xFFE11D48.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                typeface = Typeface.DEFAULT_BOLD
+                letterSpacing = 0.06f
+                setPadding(0, dp(26), 0, dp(10))
+            },
+        )
+    }
+
+    private fun statRow(label: String, home: Int, away: Int) {
+        val c = statsContainer ?: return
+
+        fun value(v: Int, gravity: Int) = TextView(this).apply {
+            text = v.toString()
+            setTextColor(0xFFFFFFFF.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
+            typeface = Typeface.DEFAULT_BOLD
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            this.gravity = gravity
+        }
+
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(8), 0, 0)
+        }
+        row.addView(value(home, Gravity.END))
+        row.addView(
+            TextView(this).apply {
+                text = label.uppercase()
+                setTextColor(0xFF888888.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.6f)
+                setPadding(dp(14), 0, dp(14), 0)
+            },
+        )
+        row.addView(value(away, Gravity.START))
+        c.addView(row)
+
+        // Двухцветная полоса пропорций, как на сайте
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(4),
+            ).apply { topMargin = dp(5) }
+        }
+        fun seg(w: Int, color: Int) = View(this).apply {
+            setBackgroundColor(color)
+            layoutParams = LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.MATCH_PARENT,
+                if (w > 0) w.toFloat() else 0.01f,
+            )
+        }
+        bar.addView(seg(home, 0xFFE11D48.toInt()))
+        bar.addView(seg(away, 0xFF3A3A3A.toInt()))
+        c.addView(bar)
+    }
+
+    private fun renderStats(s: MatchStatsResponse) {
+        val c = statsContainer ?: return
+        c.removeAllViews()
+        val info = s.match
+
+        c.addView(
+            TextView(this).apply {
+                text = "${info?.home ?: ""}  ${info?.scoreHome ?: 0} : ${info?.scoreAway ?: 0}  ${info?.away ?: ""}"
+                setTextColor(0xFFFFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+            },
+        )
+
+        val p = s.periods
+        val periodLine = listOfNotNull(
+            listOfNotNull(p?.first, p?.second, p?.third)
+                .filter { !it.isNullOrBlank() }
+                .joinToString("  ·  ")
+                .ifBlank { null },
+            p?.overtime?.takeIf { it.isNotBlank() }?.let { "ОТ: $it" },
+            p?.penalties?.takeIf { it.isNotBlank() }?.let { "Б: $it" },
+        ).joinToString("  ·  ")
+        if (periodLine.isNotBlank()) {
+            c.addView(
+                TextView(this).apply {
+                    text = periodLine
+                    setTextColor(0xFF888888.toInt())
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                    gravity = Gravity.CENTER
+                    setPadding(0, dp(6), 0, 0)
+                },
+            )
+        }
+
+        if (s.goals.isNotEmpty()) {
+            sectionTitle("Авторы шайб")
+            val images = HashMap<String, String?>()
+            for (pl in (s.rosters?.home ?: emptyList()) + (s.rosters?.away ?: emptyList())) {
+                if (pl.image != null) images[pl.name] = pl.image
+            }
+            for (g in s.goals) {
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(6), 0, dp(6))
+                }
+                row.addView(
+                    ImageView(this).apply {
+                        layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
+                            .apply { marginEnd = dp(16) }
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        setBackgroundColor(0xFF222222.toInt())
+                        load(images[g.scorer]) {
+                            transformations(CircleCropTransformation())
+                        }
+                    },
+                )
+                val col = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+                    )
+                }
+                val meta = buildString {
+                    g.time?.takeIf { it.isNotBlank() }?.let { append(it) }
+                    g.score?.takeIf { it.isNotBlank() }?.let {
+                        if (isNotEmpty()) append("  ·  ")
+                        append(it)
+                    }
+                    if (g.period in 1..3) {
+                        if (isNotEmpty()) append("  ·  ")
+                        append("${g.period} период")
+                    }
+                }
+                if (meta.isNotBlank()) {
+                    col.addView(
+                        TextView(this).apply {
+                            text = meta
+                            setTextColor(0xFF888888.toInt())
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                        },
+                    )
+                }
+                col.addView(
+                    TextView(this).apply {
+                        text = g.scorer
+                        setTextColor(0xFFFFFFFF.toInt())
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+                        typeface = Typeface.DEFAULT_BOLD
+                    },
+                )
+                val assists = g.assistants.filter { it.isNotBlank() }
+                if (assists.isNotEmpty()) {
+                    col.addView(
+                        TextView(this).apply {
+                            text = "Ассист: ${assists.joinToString(", ")}"
+                            setTextColor(0xFF888888.toInt())
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                            setPadding(0, dp(2), 0, 0)
+                        },
+                    )
+                }
+                row.addView(col)
+                c.addView(row)
+            }
+        }
+
+        val hs = s.teamStats?.home
+        val asAway = s.teamStats?.away
+        if (hs != null && asAway != null) {
+            sectionTitle("Статистика")
+            statRow("Броски", hs.shots, asAway.shots)
+            statRow("Вбрасывания", hs.faceoffsWon, asAway.faceoffsWon)
+            statRow("Большинство", hs.ppg, asAway.ppg)
+            statRow("Меньшинство", hs.shg, asAway.shg)
+            statRow("Штрафные минуты", hs.pim, asAway.pim)
+            statRow("Входы в зону", hs.zoneEntries, asAway.zoneEntries)
+            val pcH = hs.puckControl
+            val pcA = asAway.puckControl
+            if (pcH != null && pcA != null) {
+                statRow("Владение шайбой %", pcH.toInt(), pcA.toInt())
+            }
+        }
+
+        if (s.penalties.isNotEmpty()) {
+            sectionTitle("Удаления")
+            for (pen in s.penalties) {
+                val line = buildString {
+                    pen.time?.takeIf { it.isNotBlank() }?.let { append(it) }
+                    append(" · ${pen.minutes} мин")
+                    if (pen.reason.isNotBlank()) append(" · ${pen.reason}")
+                    if (pen.player.isNotBlank()) append(" — ${pen.player}")
+                }
+                c.addView(
+                    TextView(this).apply {
+                        text = line
+                        setTextColor(0xFFCCCCCC.toInt())
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                        setPadding(0, dp(5), 0, dp(5))
+                    },
+                )
+            }
+        }
+
+        c.addView(
+            TextView(this).apply {
+                text = "Данные KHL · обновляется автоматически"
+                setTextColor(0xFF555555.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                gravity = Gravity.CENTER
+                setPadding(0, dp(30), 0, dp(10))
+            },
+        )
+    }
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (statsVisible) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_BACK -> {
+                    closeStats()
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    statsScroll?.smoothScrollBy(0, dp(320))
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    val s = statsScroll
+                    if (s != null && s.scrollY <= 0) closeStats()
+                    else s?.smoothScrollBy(0, -dp(320))
+                    return true
+                }
+            }
+        } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN && match != null) {
+            openStats()
+            return true
+        }
+
         val p = player
         if (p != null && playerView?.visibility == View.VISIBLE) {
             when (keyCode) {

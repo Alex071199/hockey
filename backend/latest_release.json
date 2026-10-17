@@ -1,6 +1,6 @@
 {
-  "version": "1.4",
-  "version_code": 5,
-  "apk_url": "https://github.com/Alex071199/hockey/releases/download/v5/HockeyLiveTV.apk",
-  "notes": "Чистый плеер для всех источников — как на сайте"
+  "version": "1.5",
+  "version_code": 6,
+  "apk_url": "https://github.com/Alex071199/hockey/releases/download/v6/HockeyLiveTV.apk",
+  "notes": "Статистика матча по стрелке вниз: авторы шайб с фото, броски, вбрасывания"
 }

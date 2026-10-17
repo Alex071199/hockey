@@ -29,4 +29,53 @@ object ApiClient {
             }
         }
     }
+
+    suspend fun fetchMatchStats(
+        server: String,
+        home: String,
+        away: String,
+        date: String,
+        live: Boolean = false,
+    ): MatchStatsResponse? = withContext(Dispatchers.IO) {
+        // Матч мог начаться в другой день по UTC — пробуем соседние даты
+        val enc = { s: String -> java.net.URLEncoder.encode(s, "UTF-8") }
+        for (d in dateVariants(date)) {
+            var u = "${server.trimEnd('/')}/api/match-stats" +
+                "?home=${enc(home)}&away=${enc(away)}&date=$d"
+            if (live) u += "&live=true"
+            val resp = runCatching {
+                http.newCall(Request.Builder().url(u).build()).execute()
+            }.getOrNull() ?: continue
+            val result: MatchStatsResponse? = resp.use {
+                if (it.code == 404) {
+                    null
+                } else {
+                    val body = it.body?.string()
+                    if (it.isSuccessful && body != null) {
+                        runCatching {
+                            JsonFormat.json.decodeFromString(MatchStatsResponse.serializer(), body)
+                        }.getOrNull()
+                    } else {
+                        null
+                    }
+                }
+            }
+            if (result != null) return@withContext result
+        }
+        null
+    }
+
+    private fun dateVariants(date: String): List<String> {
+        if (!Regex("""\d{4}-\d{2}-\d{2}""").matches(date)) return listOf(date)
+        return try {
+            val d = java.time.LocalDate.parse(date)
+            listOf(
+                d.toString(),
+                d.minusDays(1).toString(),
+                d.plusDays(1).toString(),
+            )
+        } catch (e: Exception) {
+            listOf(date)
+        }
+    }
 }
