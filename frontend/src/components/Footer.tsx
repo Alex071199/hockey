@@ -100,6 +100,13 @@ export default function Footer() {
               >
                 <img src="/telegram-mono.svg" alt="Telegram" className="w-4 h-4 opacity-60 group-hover:opacity-100" />
               </a>
+              <Link
+                href="/download"
+                title="Скачать приложение"
+                className="w-8 h-8 rounded-lg bg-hockey-card border border-hockey-border flex items-center justify-center hover:border-hockey-accent/40 hover:bg-hockey-accent/10 transition-all duration-200"
+              >
+                <img src="/android.svg" alt="Android" className="w-4 h-4 opacity-60 group-hover:opacity-100" />
+              </Link>
               <span className="text-[10px] sm:text-xs text-hockey-text-muted">
                 18+ | 4+
               </span>

@@ -26,12 +26,13 @@ export default function Header() {
     return () => clearInterval(id);
   }, []);
 
-  const navLinks = [
-    { href: "/", label: "Матчи" },
-    { href: "/schedule", label: "Календарь" },
-    { href: "/standings", label: "Таблица" },
-    { href: "/donate", label: "Поддержать" },
-  ];
+const navLinks = [
+  { href: "/", label: "Матчи" },
+  { href: "/schedule", label: "Календарь" },
+  { href: "/standings", label: "Таблица" },
+  { href: "/download", label: "Приложение" },
+  { href: "/donate", label: "Поддержать" },
+];
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 glass">
