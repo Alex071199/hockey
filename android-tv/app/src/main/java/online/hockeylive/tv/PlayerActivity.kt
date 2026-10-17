@@ -38,7 +38,7 @@ class PlayerActivity : ComponentActivity() {
             null
         }
 
-        val root = FrameLayout(this).apply { setBackgroundColor(0xFF0D1117.toInt()) }
+        val root = FrameLayout(this).apply { setBackgroundColor(0xFF0A0A0A.toInt()) }
 
         val pv = PlayerView(this).apply {
             useController = true
@@ -83,38 +83,51 @@ class PlayerActivity : ComponentActivity() {
 
     private fun startAce(hash: String, title: String) {
         showStatus("Запуск движка Ace Stream…\n$title")
-        val manager = AceEngineManager(this)
-        engineManager = manager
-        manager.start { result ->
-            when (result) {
-                is AceEngineManager.Result.Ready -> {
-                    val url = "http://127.0.0.1:${result.httpPort}/ace/manifest.m3u8?id=$hash"
-                    playUrl(url, title)
-                }
-                is AceEngineManager.Result.EngineMissing -> {
-                    startActivity(Intent(this, EngineSetupActivity::class.java))
-                    showError("Движок Ace Stream не установлен.\nУстановите его и вернитесь к матчу.")
-                }
-                is AceEngineManager.Result.Failed -> {
-                    showError("Ошибка Ace Stream:\n${result.message}")
+        try {
+            val manager = AceEngineManager(this)
+            engineManager = manager
+            manager.start { result ->
+                when (result) {
+                    is AceEngineManager.Result.Ready -> {
+                        val url = "http://127.0.0.1:${result.httpPort}/ace/manifest.m3u8?id=$hash"
+                        playUrl(url, title)
+                    }
+                    is AceEngineManager.Result.EngineMissing -> {
+                        try {
+                            startActivity(Intent(this, EngineSetupActivity::class.java))
+                        } catch (_: Exception) {}
+                        showError("Движок Ace Stream не установлен.\nУстановите его и вернитесь к матчу.")
+                    }
+                    is AceEngineManager.Result.Failed -> {
+                        showError("Ошибка Ace Stream:\n${result.message}")
+                    }
                 }
             }
+        } catch (e: Exception) {
+            showError("Ошибка: ${e.message}")
         }
     }
 
     private fun playUrl(url: String, title: String) {
         showStatus("Буферизация…\n$title")
-        val p = ExoPlayer.Builder(this).build()
-        player = p
-        playerView?.player = p
-        p.addListener(object : Player.Listener {
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) hideStatus()
-            }
-        })
-        p.setMediaItem(MediaItem.fromUri(url))
-        p.playWhenReady = true
-        p.prepare()
+        try {
+            val p = ExoPlayer.Builder(this).build()
+            player = p
+            playerView?.player = p
+            p.addListener(object : Player.Listener {
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    if (isPlaying) hideStatus()
+                }
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    showError("Ошибка воспроизведения:\n${error.errorCodeName}")
+                }
+            })
+            p.setMediaItem(MediaItem.fromUri(url))
+            p.playWhenReady = true
+            p.prepare()
+        } catch (e: Exception) {
+            showError("Ошибка: ${e.message}")
+        }
     }
 
     private fun showStatus(text: String) {

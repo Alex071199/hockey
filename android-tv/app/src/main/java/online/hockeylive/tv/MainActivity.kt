@@ -1,6 +1,5 @@
 package online.hockeylive.tv
 
-import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
@@ -36,6 +35,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Surface
@@ -65,6 +65,7 @@ class MainActivity : ComponentActivity() {
             var matches by remember { mutableStateOf<List<Match>>(emptyList()) }
             var error by remember { mutableStateOf<String?>(null) }
             var loading by remember { mutableStateOf(true) }
+            var pendingMatch by remember { mutableStateOf<Match?>(null) }
 
             LaunchedEffect(Unit) {
                 while (true) {
@@ -83,44 +84,81 @@ class MainActivity : ComponentActivity() {
                 matches = matches.filter { it.isLive },
                 error = error,
                 loading = loading,
-                onMatchClick = { match -> openMatch(context, match) },
+                onMatchClick = { match ->
+                    val aceHash = match.aceHashes.firstOrNull()
+                    val prime = match.primeUrl
+                    when {
+                        aceHash != null && prime != null -> pendingMatch = match
+                        else -> launchPlayer(context, match, forceAce = null)
+                    }
+                },
             )
+
+            pendingMatch?.let { m ->
+                SourceChoiceDialog(
+                    match = m,
+                    onChoice = { useAce ->
+                        pendingMatch = null
+                        launchPlayer(context, m, forceAce = if (useAce) m.aceHashes.firstOrNull() else null)
+                    },
+                    onDismiss = { pendingMatch = null },
+                )
+            }
         }
     }
 
-    private fun openMatch(context: android.content.Context, match: Match) {
-        val aceHash = match.aceHashes.firstOrNull()
-        val prime = match.primeUrl
-        val title = "${match.teamHome} — ${match.teamAway}"
+    private fun launchPlayer(context: android.content.Context, match: Match, forceAce: String?) {
+        val intent = Intent(context, PlayerActivity::class.java)
+        intent.putExtra(PlayerActivity.EXTRA_MATCH_JSON, JsonFormat.json.encodeToString(match))
+        if (forceAce != null) intent.putExtra(PlayerActivity.EXTRA_FORCE_ACE, forceAce)
+        context.startActivity(intent)
+    }
+}
 
-        when {
-            aceHash != null && prime != null -> {
-                val options = arrayOf("Основной", "AceStream")
-                android.app.AlertDialog.Builder(context)
-                    .setTitle(title)
-                    .setItems(options) { _, which ->
-                        val intent = Intent(context, PlayerActivity::class.java)
-                        intent.putExtra(PlayerActivity.EXTRA_MATCH_JSON, JsonFormat.json.encodeToString(match))
-                        if (which == 1) {
-                            intent.putExtra(PlayerActivity.EXTRA_FORCE_ACE, aceHash)
-                        }
-                        context.startActivity(intent)
-                    }
-                    .setNegativeButton("Отмена", null)
-                    .show()
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun SourceChoiceDialog(match: Match, onChoice: (useAce: Boolean) -> Unit, onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .background(Theme.card)
+                .padding(24.dp),
+        ) {
+            Text(
+                text = "${match.teamHome} — ${match.teamAway}",
+                color = Theme.text,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(16.dp))
+            Surface(
+                onClick = { onChoice(false) },
+                colors = ClickableSurfaceDefaults.colors(
+                    containerColor = Theme.cardHover,
+                    focusedContainerColor = Theme.accent,
+                ),
+            ) {
+                Text(
+                    text = "  Основной  ",
+                    color = Theme.text,
+                    fontSize = 16.sp,
+                    modifier = Modifier.padding(vertical = 12.dp),
+                )
             }
-            aceHash != null -> {
-                val intent = Intent(context, PlayerActivity::class.java)
-                intent.putExtra(PlayerActivity.EXTRA_MATCH_JSON, JsonFormat.json.encodeToString(match))
-                context.startActivity(intent)
-            }
-            prime != null -> {
-                val intent = Intent(context, PlayerActivity::class.java)
-                intent.putExtra(PlayerActivity.EXTRA_MATCH_JSON, JsonFormat.json.encodeToString(match))
-                context.startActivity(intent)
-            }
-            else -> {
-                Toast.makeText(context, "Нет доступных источников", Toast.LENGTH_SHORT).show()
+            Spacer(Modifier.height(8.dp))
+            Surface(
+                onClick = { onChoice(true) },
+                colors = ClickableSurfaceDefaults.colors(
+                    containerColor = Theme.cardHover,
+                    focusedContainerColor = Theme.accent,
+                ),
+            ) {
+                Text(
+                    text = "  AceStream  ",
+                    color = Theme.text,
+                    fontSize = 16.sp,
+                    modifier = Modifier.padding(vertical = 12.dp),
+                )
             }
         }
     }
