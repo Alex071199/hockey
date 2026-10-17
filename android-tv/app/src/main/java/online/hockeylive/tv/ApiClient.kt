@@ -16,19 +16,17 @@ object ApiClient {
     private val listAdapter = ListSerializer(Match.serializer())
 
     suspend fun fetchMatches(server: String): List<Match> = withContext(Dispatchers.IO) {
-        val all = mutableListOf<Match>()
-        for (league in listOf("KHL", "NHL")) {
-            val req = Request.Builder()
-                .url("$server/api/schedule?league=$league")
-                .header("Accept", "application/json")
-                .build()
-            val body = http.newCall(req).execute().use { resp ->
-                if (resp.isSuccessful) resp.body?.string() else null
-            }
-            if (body != null) {
-                all += JsonFormat.json.decodeFromString(listAdapter, body)
+        val req = Request.Builder()
+            .url("$server/api/schedule")
+            .header("Accept", "application/json")
+            .build()
+        http.newCall(req).execute().use { resp ->
+            if (resp.isSuccessful) {
+                val body = resp.body?.string()
+                if (body != null) JsonFormat.json.decodeFromString(listAdapter, body) else emptyList()
+            } else {
+                emptyList()
             }
         }
-        all
     }
 }

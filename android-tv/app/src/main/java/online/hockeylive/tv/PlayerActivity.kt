@@ -1,14 +1,20 @@
 package online.hockeylive.tv
 
-import android.app.Activity
+import android.annotation.SuppressLint
 import android.content.Intent
+import android.graphics.Bitmap
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.View
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -19,15 +25,16 @@ class PlayerActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_MATCH_JSON = "match_json"
-        const val EXTRA_FORCE_ACE = "force_ace"
+        const val EXTRA_SOURCE_URL = "source_url"
     }
 
     private var player: ExoPlayer? = null
     private var playerView: PlayerView? = null
+    private var webView: WebView? = null
     private var statusText: TextView? = null
-    private var engineManager: AceEngineManager? = null
     private var match: Match? = null
 
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -44,8 +51,29 @@ class PlayerActivity : ComponentActivity() {
             useController = true
             controllerShowTimeoutMs = 4000
             setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
+            visibility = View.GONE
         }
         root.addView(pv, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+
+        val wv = WebView(this).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            settings.setSupportMultipleWindows(false)
+            visibility = View.GONE
+            webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = false
+                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                    hideStatus()
+                }
+            }
+            webChromeClient = object : WebChromeClient() {
+                override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                    if (newProgress >= 60) hideStatus()
+                }
+            }
+        }
+        root.addView(wv, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
 
         val status = TextView(this).apply {
             setTextColor(0xFFC9D1D9.toInt())
@@ -60,6 +88,7 @@ class PlayerActivity : ComponentActivity() {
 
         setContentView(root)
         playerView = pv
+        webView = wv
         statusText = status
 
         val m = match
@@ -69,47 +98,31 @@ class PlayerActivity : ComponentActivity() {
         }
 
         val title = "${m.teamHome} — ${m.teamAway}"
-        val forceAce = intent.getStringExtra(EXTRA_FORCE_ACE)
-        val aceHash = m.aceHashes.firstOrNull()
-        val prime = m.primeUrl
+        val sourceUrl = intent.getStringExtra(EXTRA_SOURCE_URL)
+            ?: m.playableSources.firstOrNull()?.url
 
-        when {
-            forceAce != null -> startAce(forceAce, title)
-            prime != null -> playUrl(prime, title)
-            aceHash != null -> startAce(aceHash, title)
-            else -> showError("Нет доступных источников\n\n$title")
+        if (sourceUrl == null) {
+            showError("Нет доступных источников\n\n$title")
+            return
+        }
+
+        val source = m.playableSources.firstOrNull { it.url == sourceUrl }
+        playSource(sourceUrl, source, title)
+    }
+
+    private fun playSource(url: String, source: StreamUrl?, title: String) {
+        val isHls = source?.isHls ?: url.contains(".m3u8")
+        if (isHls) {
+            startExoPlayer(url, title)
+        } else {
+            startWebView(url, title)
         }
     }
 
-    private fun startAce(hash: String, title: String) {
-        showStatus("Запуск движка Ace Stream…\n$title")
-        try {
-            val manager = AceEngineManager(this)
-            engineManager = manager
-            manager.start { result ->
-                when (result) {
-                    is AceEngineManager.Result.Ready -> {
-                        val url = "http://127.0.0.1:${result.httpPort}/ace/manifest.m3u8?id=$hash"
-                        playUrl(url, title)
-                    }
-                    is AceEngineManager.Result.EngineMissing -> {
-                        try {
-                            startActivity(Intent(this, EngineSetupActivity::class.java))
-                        } catch (_: Exception) {}
-                        showError("Движок Ace Stream не установлен.\nУстановите его и вернитесь к матчу.")
-                    }
-                    is AceEngineManager.Result.Failed -> {
-                        showError("Ошибка Ace Stream:\n${result.message}")
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            showError("Ошибка: ${e.message}")
-        }
-    }
-
-    private fun playUrl(url: String, title: String) {
+    private fun startExoPlayer(url: String, title: String) {
         showStatus("Буферизация…\n$title")
+        playerView?.visibility = View.VISIBLE
+        webView?.visibility = View.GONE
         try {
             val p = ExoPlayer.Builder(this).build()
             player = p
@@ -118,7 +131,7 @@ class PlayerActivity : ComponentActivity() {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     if (isPlaying) hideStatus()
                 }
-                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                override fun onPlayerError(error: PlaybackException) {
                     showError("Ошибка воспроизведения:\n${error.errorCodeName}")
                 }
             })
@@ -128,6 +141,25 @@ class PlayerActivity : ComponentActivity() {
         } catch (e: Exception) {
             showError("Ошибка: ${e.message}")
         }
+    }
+
+    private fun startWebView(url: String, title: String) {
+        showStatus("Загрузка трансляции…\n$title")
+        playerView?.visibility = View.GONE
+        webView?.visibility = View.VISIBLE
+        var finalUrl = url
+        // Для YouTube embed включаем автоплей
+        if (url.contains("youtube.com/embed/")) {
+            val sep = if (url.contains("?")) "&" else "?"
+            finalUrl = url + sep + "autoplay=1&rel=0&playsinline=1"
+        }
+        // Для rutube embed — автоплей
+        if (url.contains("rutube.ru/play/embed/")) {
+            finalUrl = url + "?autoplay=1"
+        }
+        webView?.loadUrl(finalUrl)
+        // Если за 15 секунд не скрыло статус — скрываем всё равно
+        statusText?.postDelayed({ hideStatus() }, 15000)
     }
 
     private fun showStatus(text: String) {
@@ -147,7 +179,7 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         val p = player
-        if (p != null) {
+        if (p != null && playerView?.visibility == View.VISIBLE) {
             when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
                     if (p.isPlaying) p.pause() else p.play()
@@ -174,13 +206,19 @@ class PlayerActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         player?.pause()
+        webView?.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        webView?.onResume()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         player?.release()
         player = null
-        engineManager?.release()
-        engineManager = null
+        webView?.destroy()
+        webView = null
     }
 }

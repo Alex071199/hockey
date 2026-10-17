@@ -96,11 +96,10 @@ class MainActivity : ComponentActivity() {
                 error = error,
                 loading = loading,
                 onMatchClick = { match ->
-                    val aceHash = match.aceHashes.firstOrNull()
-                    val prime = match.primeUrl
                     when {
-                        aceHash != null && prime != null -> pendingMatch = match
-                        else -> launchPlayer(context, match, forceAce = null)
+                        match.playableSources.size > 1 -> pendingMatch = match
+                        match.playableSources.size == 1 -> launchPlayer(context, match, match.playableSources.first())
+                        else -> Toast.makeText(context, "Нет доступных источников", Toast.LENGTH_SHORT).show()
                     }
                 },
             )
@@ -108,9 +107,9 @@ class MainActivity : ComponentActivity() {
             pendingMatch?.let { m ->
                 SourceChoiceDialog(
                     match = m,
-                    onChoice = { useAce ->
+                    onChoice = { source ->
                         pendingMatch = null
-                        launchPlayer(context, m, forceAce = if (useAce) m.aceHashes.firstOrNull() else null)
+                        launchPlayer(context, m, source)
                     },
                     onDismiss = { pendingMatch = null },
                 )
@@ -132,11 +131,84 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun launchPlayer(context: android.content.Context, match: Match, forceAce: String?) {
+    private fun launchPlayer(context: android.content.Context, match: Match, source: StreamUrl?) {
         val intent = Intent(context, PlayerActivity::class.java)
         intent.putExtra(PlayerActivity.EXTRA_MATCH_JSON, JsonFormat.json.encodeToString(match))
-        if (forceAce != null) intent.putExtra(PlayerActivity.EXTRA_FORCE_ACE, forceAce)
+        if (source != null) intent.putExtra(PlayerActivity.EXTRA_SOURCE_URL, source.url)
         context.startActivity(intent)
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun SourceChoiceDialog(match: Match, onChoice: (StreamUrl) -> Unit, onDismiss: () -> Unit) {
+    val sources = match.playableSources
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .background(Theme.card)
+                .padding(24.dp)
+                .width(380.dp),
+        ) {
+            Text(
+                text = "${match.teamHome} — ${match.teamAway}",
+                color = Theme.text,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Выберите источник",
+                color = Theme.textSecondary,
+                fontSize = 13.sp,
+            )
+            Spacer(Modifier.height(16.dp))
+            sources.forEachIndexed { index, src ->
+                Surface(
+                    onClick = { onChoice(src) },
+                    colors = ClickableSurfaceDefaults.colors(
+                        containerColor = Theme.cardHover,
+                        focusedContainerColor = Theme.accent,
+                    ),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 10.dp, horizontal = 12.dp),
+                    ) {
+                        Text(
+                            text = "${index + 1}.",
+                            color = Theme.textSecondary,
+                            fontSize = 14.sp,
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = src.displayName,
+                            color = Theme.text,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+                if (index < sources.lastIndex) Spacer(Modifier.height(6.dp))
+            }
+            Spacer(Modifier.height(14.dp))
+            Surface(
+                onClick = onDismiss,
+                colors = ClickableSurfaceDefaults.colors(
+                    containerColor = Theme.cardHover,
+                    focusedContainerColor = Theme.border,
+                ),
+            ) {
+                Text(
+                    text = "  Отмена  ",
+                    color = Theme.textSecondary,
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(vertical = 8.dp),
+                )
+            }
+        }
     }
 }
 
@@ -217,55 +289,6 @@ fun UpdateDialog(info: AppVersionInfo, status: String?, onUpdate: () -> Unit, on
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-fun SourceChoiceDialog(match: Match, onChoice: (useAce: Boolean) -> Unit, onDismiss: () -> Unit) {
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .background(Theme.card)
-                .padding(24.dp),
-        ) {
-            Text(
-                text = "${match.teamHome} — ${match.teamAway}",
-                color = Theme.text,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.height(16.dp))
-            Surface(
-                onClick = { onChoice(false) },
-                colors = ClickableSurfaceDefaults.colors(
-                    containerColor = Theme.cardHover,
-                    focusedContainerColor = Theme.accent,
-                ),
-            ) {
-                Text(
-                    text = "  Основной  ",
-                    color = Theme.text,
-                    fontSize = 16.sp,
-                    modifier = Modifier.padding(vertical = 12.dp),
-                )
-            }
-            Spacer(Modifier.height(8.dp))
-            Surface(
-                onClick = { onChoice(true) },
-                colors = ClickableSurfaceDefaults.colors(
-                    containerColor = Theme.cardHover,
-                    focusedContainerColor = Theme.accent,
-                ),
-            ) {
-                Text(
-                    text = "  AceStream  ",
-                    color = Theme.text,
-                    fontSize = 16.sp,
-                    modifier = Modifier.padding(vertical = 12.dp),
-                )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalTvMaterial3Api::class)
-@Composable
 fun HomeScreen(
     matches: List<Match>,
     error: String?,
@@ -274,7 +297,8 @@ fun HomeScreen(
 ) {
     val khl = matches.filter { it.league.equals("KHL", true) }
     val nhl = matches.filter { it.league.equals("NHL", true) }
-    val other = matches.filter { !it.league.equals("KHL", true) && !it.league.equals("NHL", true) }
+    val vhl = matches.filter { it.league.equals("VHL", true) }
+    val mhl = matches.filter { it.league.equals("MHL", true) }
 
     Column(
         modifier = Modifier
@@ -305,7 +329,7 @@ fun HomeScreen(
                 text = when {
                     loading -> "Загрузка…"
                     error != null -> error
-                    else -> "KHL · NHL"
+                    else -> "KHL · NHL · VHL · MHL"
                 },
                 color = Theme.textSecondary,
                 fontSize = 14.sp,
@@ -319,15 +343,10 @@ fun HomeScreen(
             contentPadding = PaddingValues(vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            if (khl.isNotEmpty()) {
-                item { LeagueRow("КХЛ", "KHL", khl, onMatchClick) }
-            }
-            if (nhl.isNotEmpty()) {
-                item { LeagueRow("НХЛ", "NHL", nhl, onMatchClick) }
-            }
-            if (other.isNotEmpty()) {
-                item { LeagueRow("Другие лиги", null, other, onMatchClick) }
-            }
+            if (khl.isNotEmpty()) item { LeagueRow("КХЛ", "KHL", khl, onMatchClick) }
+            if (nhl.isNotEmpty()) item { LeagueRow("НХЛ", "NHL", nhl, onMatchClick) }
+            if (vhl.isNotEmpty()) item { LeagueRow("ВХЛ", "VHL", vhl, onMatchClick) }
+            if (mhl.isNotEmpty()) item { LeagueRow("МХЛ", "MHL", mhl, onMatchClick) }
             if (!loading && error == null && matches.isEmpty()) {
                 item {
                     Text(
@@ -396,11 +415,7 @@ fun MatchCard(match: Match, onClick: () -> Unit) {
                 Spacer(Modifier.weight(1f))
                 if (match.isLive) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "●",
-                            color = Theme.live,
-                            fontSize = 10.sp,
-                        )
+                        Text(text = "●", color = Theme.live, fontSize = 10.sp)
                         Spacer(Modifier.width(4.dp))
                         Text(
                             text = "LIVE",

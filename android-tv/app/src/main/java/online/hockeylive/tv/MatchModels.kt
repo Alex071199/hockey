@@ -9,7 +9,20 @@ data class StreamUrl(
     val url: String = "",
     val quality: String? = null,
     val source: String = "",
-)
+) {
+    val isHls: Boolean
+        get() = url.contains(".m3u8") || url.contains("stream.m3u8")
+
+    val displayName: String
+        get() = when {
+            source == "prime" -> "Прайм"
+            source == "sportplustv" -> "Спорт Плюс"
+            source == "rutube" -> "Rutube"
+            source == "livetv_youtube" -> "YouTube"
+            source == "livetv_alieztv" -> "LiveTV"
+            else -> source.ifEmpty { "Источник" }
+        }
+}
 
 @Serializable
 data class Match(
@@ -27,14 +40,10 @@ data class Match(
 ) {
     val isLive: Boolean get() = status == "live"
 
-    val aceHashes: List<String>
+    val playableSources: List<StreamUrl>
         get() = streamUrls
-            .filter { it.source == "acestream" && it.url.startsWith("acestream://") }
-            .map { it.url.removePrefix("acestream://").trim() }
-            .filter { it.isNotEmpty() }
-
-    val primeUrl: String?
-        get() = streamUrls.firstOrNull { it.source == "prime" }?.url
+            .filter { !it.source.equals("acestream", true) && it.url.isNotBlank() }
+            .distinctBy { it.source + "|" + it.url }
 
     val displayScore: String
         get() = if (homeScore != null && awayScore != null) "$homeScore : $awayScore" else ""
