@@ -213,17 +213,39 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    // Источники, которые наш бэкенд резолвит в чистый плеер —
+    // тот же список, что needsProxy во фронтенде (StreamPlayer.tsx).
+    private fun needsProxy(url: String): Boolean = listOf(
+        "sportplus.watch", "web2.onsport365.live", "sportplustv.live", "pppdata.com",
+        "sportvideodata.com", "vitalsport1.ru", "milanolive.top", "playyy.php",
+        "apl431.me", "apl430.me", "apl502.me", "peerflow", "buzznews4u.com",
+        "livep2p.top", "onlinestreams.ru", "playfa.st", "shd247.world",
+        "dynbetray.net", "varline.store", "wideiptv.top", "vdocity.com",
+        "embedded.slevel.ru", "videocdn", "red.sport", "onhockey.tv",
+        "livetv903.me", "livetv.sx", "livetv904.me", "/cdnlivetv",
+    ).any { it in url }
+
     private fun startWebView(url: String, title: String) {
         showStatus("Загрузка трансляции…\n$title")
         playerView?.visibility = View.GONE
         webView?.visibility = View.VISIBLE
-        var finalUrl = url
+
+        // Как на сайте: для проксируемых источников грузим не страницу
+        // провайдера, а наш /api/proxy/stream — там backend вычищает
+        // интерфейс и отдаёт чистый плеер.
+        var finalUrl = if (needsProxy(url)) {
+            val server = AppSettings.serverUrl(this).trimEnd('/')
+            "$server/api/proxy/stream?url=" +
+                java.net.URLEncoder.encode(url, "UTF-8")
+        } else {
+            url
+        }
         if (url.contains("youtube.com/embed/")) {
-            val sep = if (url.contains("?")) "&" else "?"
-            finalUrl = url + sep + "autoplay=1&rel=0&playsinline=1"
+            val sep = if (finalUrl.contains("?")) "&" else "?"
+            finalUrl = finalUrl + sep + "autoplay=1&rel=0&playsinline=1"
         }
         if (url.contains("rutube.ru/play/embed/")) {
-            finalUrl = url + "?autoplay=1"
+            finalUrl = finalUrl + "?autoplay=1"
         }
         webView?.loadUrl(finalUrl)
         // Если страница не дала плеер за 25 секунд — пробуем следующий источник
