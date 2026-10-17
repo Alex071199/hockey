@@ -106,8 +106,23 @@ async def _active_subscribers() -> list[str]:
         return [row[0] for row in res.all()]
 
 
+async def _save_news(text: str) -> None:
+    """Сохранить новость в БД — она попадёт в колокольчик на сайте."""
+    try:
+        from app.database import async_session
+        from app.models import News
+
+        async with async_session() as db:
+            db.add(News(text=text))
+            await db.commit()
+    except Exception as e:
+        logger.warning("news save failed: %s", e)
+
+
 async def broadcast(text: str) -> tuple[int, int]:
     """Send text to all active subscribers. Returns (sent, failed)."""
+    # Всё, что видят все подписчики бота, попадает и на сайт (колокольчик)
+    await _save_news(text)
     chat_ids = await _active_subscribers()
     sent = failed = 0
     for cid in chat_ids:

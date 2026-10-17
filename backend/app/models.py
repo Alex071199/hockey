@@ -59,3 +59,11 @@ class Donation(Base):
     tx_id = Column(String, nullable=True, index=True)
     message = Column(String, nullable=True)
     created_at = Column(DateTime, default=func.now())
+
+
+class News(Base):
+    __tablename__ = "news"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    text = Column(String)
+    created_at = Column(DateTime, default=func.now())

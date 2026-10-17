@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
+import NotificationsBell from "@/components/NotificationsBell";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 
@@ -60,6 +61,7 @@ export default function Header() {
           </nav>
 
           <div className="flex items-center gap-3">
+            <NotificationsBell />
             <Link
               href="/#live"
               className="hidden sm:inline-flex btn-red px-4 py-2 rounded-lg text-xs font-bold items-center gap-2"
