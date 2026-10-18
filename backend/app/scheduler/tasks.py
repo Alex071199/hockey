@@ -61,9 +61,16 @@ def _mhl_name_match(a: str | None, b: str | None) -> bool:
         return True
     if len(x) > len(y):
         x, y = y, x
+    if len(x) < 5:
+        return False
     # word-boundary prefix: "АКМ-Юниор" == "АКМ-Юниор Новомосковск",
     # but "Локо" != "Локо-76" and "Спутник Ал" != handled by aliases
-    return len(x) >= 5 and y.startswith(x) and y[len(x)] == " "
+    if y.startswith(x) and y[len(x)] == " ":
+        return True
+    # word-boundary suffix: livetv shortens club names that mhl.khl.ru
+    # prefixes — "Спартак МАХ" == "МХК Спартак МАХ", "Молот" == "МХК Молот";
+    # without this the LT_-строка создавалась дублем поверх MHL_-строки
+    return y.endswith(x) and y[len(y) - len(x) - 1] == " "
 
 
 def _mhl_pair_match(a_home, a_away, b_home, b_away) -> bool:
@@ -841,6 +848,21 @@ async def dedupe_sp_matches() -> int:
                 )
                 for m in cluster:
                     if m.id != best.id:
+                        # стримы/счёт удаляемой строки переливаем в выжившую —
+                        # иначе дедуп молча терял livetv_-ссылки матча
+                        have = {s.get("url") for s in (best.stream_urls or [])}
+                        fresh = [
+                            s for s in (m.stream_urls or [])
+                            if (s.get("url") or "") not in have
+                        ]
+                        if fresh:
+                            best.stream_urls = list(best.stream_urls or []) + fresh
+                        if best.home_score is None and m.home_score is not None:
+                            best.home_score = m.home_score
+                        if best.away_score is None and m.away_score is not None:
+                            best.away_score = m.away_score
+                        if not best.current_period and m.current_period:
+                            best.current_period = m.current_period
                         await db.delete(m)
                         removed += 1
             if removed:
