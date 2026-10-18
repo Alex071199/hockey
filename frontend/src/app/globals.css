@@ -24,6 +24,10 @@
   box-sizing: border-box;
 }
 
+html {
+  overflow-x: clip;
+}
+
 body {
   background-color: var(--color-hockey-bg);
   color: var(--color-hockey-text);

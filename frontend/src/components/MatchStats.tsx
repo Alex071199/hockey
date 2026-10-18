@@ -386,6 +386,25 @@ export default function MatchStats({ data, tabs = false }: { data: MatchStatsDat
         <PeriodChart periods={data.periods} home={m.home} away={m.away} />
       </section>
 
+      {(data.highlights?.length ?? 0) > 0 && (
+        <section>
+          <h3 className="text-sm font-extrabold uppercase tracking-wide mb-3">Обзор матча</h3>
+          <div className="relative left-1/2 -translate-x-1/2 w-screen aspect-video bg-black border-y border-hockey-border">
+            {data.highlights!.map((h) => (
+              <iframe
+                key={h.video_id}
+                src={h.embed_url}
+                title="Обзор матча НХЛ"
+                allow="autoplay; fullscreen; picture-in-picture"
+                allowFullScreen
+                loading="lazy"
+                className="absolute inset-0 w-full h-full border-0"
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
       {data.highlight?.m3u8_url && (
         <section>
           <h3 className="text-sm font-extrabold uppercase tracking-wide mb-3">Обзор матча</h3>
