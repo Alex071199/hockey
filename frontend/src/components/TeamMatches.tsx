@@ -239,7 +239,7 @@ export default function TeamMatches({ teams, title }: TeamMatchesProps) {
                         <div className="flex-1 flex items-center gap-2 min-w-0">
                           <div className="flex items-center gap-1.5 flex-1 justify-end min-w-0">
                             <span className="text-xs sm:text-sm font-bold text-right truncate">{m.team_home}</span>
-                            {m.league === "KHL" && getTeamLogo(m.team_home) && (
+                            {getTeamLogo(m.team_home) && (
                               <img src={getTeamLogo(m.team_home)!} alt="" className="w-5 h-5 object-contain flex-shrink-0" />
                             )}
                           </div>
@@ -256,7 +256,7 @@ export default function TeamMatches({ teams, title }: TeamMatchesProps) {
                             <span className="text-[10px] font-black text-hockey-text-muted flex-shrink-0">VS</span>
                           )}
                           <div className="flex-1 flex items-center gap-1.5 min-w-0">
-                            {m.league === "KHL" && getTeamLogo(m.team_away) && (
+                            {getTeamLogo(m.team_away) && (
                               <img src={getTeamLogo(m.team_away)!} alt="" className="w-5 h-5 object-contain flex-shrink-0" />
                             )}
                             <span className="text-xs sm:text-sm font-bold text-left truncate">{m.team_away}</span>

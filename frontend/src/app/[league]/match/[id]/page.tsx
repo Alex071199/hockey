@@ -11,6 +11,7 @@ import DonateButtons from "@/components/DonateButtons";
 import DonationRain from "@/components/DonationRain";
 import { fetchSportPlusTVStreams, Stream } from "@/lib/sportplustv";
 import { findWinBroadcast, winStream } from "@/lib/winbroadcast";
+import { getTeamLogo } from "@/lib/team-logos";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 
@@ -360,8 +361,20 @@ export default function MatchPage() {
           )}
         </div>
 
-        <h1 className="text-lg sm:text-2xl lg:text-3xl font-black tracking-tight mb-1 leading-tight">
-          <span className={match.team_home.length > 12 ? "text-base sm:text-xl lg:text-2xl" : ""}>{match.team_home}</span> <span className="text-hockey-text-muted mx-1 sm:mx-2">vs</span> <span className={match.team_away.length > 12 ? "text-base sm:text-xl lg:text-2xl" : ""}>{match.team_away}</span>
+        <h1 className="flex flex-wrap items-center gap-y-1 gap-x-2 sm:gap-x-3 text-lg sm:text-2xl lg:text-3xl font-black tracking-tight mb-1 leading-tight">
+          <span className="inline-flex items-center gap-2 sm:gap-3">
+            {getTeamLogo(match.team_home) && (
+              <img src={getTeamLogo(match.team_home)!} alt="" className="w-8 h-8 sm:w-11 sm:h-11 object-contain" />
+            )}
+            <span className={match.team_home.length > 12 ? "text-base sm:text-xl lg:text-2xl" : ""}>{match.team_home}</span>
+          </span>
+          <span className="text-hockey-text-muted mx-1 sm:mx-2">vs</span>
+          <span className="inline-flex items-center gap-2 sm:gap-3">
+            <span className={match.team_away.length > 12 ? "text-base sm:text-xl lg:text-2xl" : ""}>{match.team_away}</span>
+            {getTeamLogo(match.team_away) && (
+              <img src={getTeamLogo(match.team_away)!} alt="" className="w-8 h-8 sm:w-11 sm:h-11 object-contain" />
+            )}
+          </span>
         </h1>
         {(match.status === "live" || match.status === "finished") && match.home_score != null && match.away_score != null && (
           <div className="flex items-center gap-3 mb-2">

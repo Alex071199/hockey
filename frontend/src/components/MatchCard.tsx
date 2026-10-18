@@ -36,9 +36,6 @@ export default function MatchCard({ match, featured = false, score = null, finis
   const favAway = match.status === "live" && isFavorite(match.team_away);
   const favoriteLive = favHome || favAway;
 
-  // Логотипы показываем только для матчей КХЛ
-  const showLogos = match.league === "KHL";
-
   useEffect(() => {
     if (match.status !== "pre_game") return;
     const update = () => {
@@ -109,7 +106,7 @@ export default function MatchCard({ match, featured = false, score = null, finis
           <div className="flex items-center justify-between gap-2 sm:gap-3">
             <div className="flex-1 flex items-center justify-end gap-2 sm:gap-3">
               <p className={`font-bold leading-tight text-right ${teamNameClass(match.team_home)} ${favHome ? "text-hockey-accent" : ""}`}>{match.team_home}</p>
-              {showLogos && getTeamLogo(match.team_home) && (
+              {getTeamLogo(match.team_home) && (
                 <img src={getTeamLogo(match.team_home)!} alt={match.team_home} className="w-8 h-8 sm:w-10 sm:h-10 object-contain" />
               )}
             </div>
@@ -143,7 +140,7 @@ export default function MatchCard({ match, featured = false, score = null, finis
               )}
             </div>
             <div className="flex-1 flex items-center gap-2 sm:gap-3">
-              {showLogos && getTeamLogo(match.team_away) && (
+              {getTeamLogo(match.team_away) && (
                 <img src={getTeamLogo(match.team_away)!} alt={match.team_away} className="w-8 h-8 sm:w-10 sm:h-10 object-contain" />
               )}
               <p className={`font-bold leading-tight text-left ${teamNameClass(match.team_away)} ${favAway ? "text-hockey-accent" : ""}`}>{match.team_away}</p>
