@@ -40,7 +40,7 @@ async def _call(method: str, payload: dict, timeout: float = 20.0) -> dict | Non
 
 async def send_message(
     chat_id: str | int, text: str, keyboard: list[list[str]] | None = None
-) -> bool:
+) -> int | None:
     payload: dict = {"chat_id": chat_id, "text": text}
     if keyboard:
         payload["reply_markup"] = {
@@ -49,23 +49,30 @@ async def send_message(
             "is_persistent": True,
         }
     data = await _call("sendMessage", payload)
-    return bool(data and data.get("ok"))
+    if data and data.get("ok"):
+        return (data.get("result") or {}).get("message_id")
+    return None
 
 
 # кнопка главного меню бота
 CONNECT_TV_BUTTON = "📺 Подключить ТВ"
 ISSUE_CODE_BUTTON = "🔑 Выдать код"
+DELETE_LAST_BUTTON = "🗑 Удалить последнюю рассылку"
 TV_MENU: list[list[str]] = [[CONNECT_TV_BUTTON]]
 
 # админ в состоянии ожидания chat_id для выдачи кода: chat_id -> ts
 _tvcode_pending: dict[int, float] = {}
 TVCODE_TTL = 300
 
+# админ подтверждает удаление последней рассылки: chat_id -> ts
+_delpending: dict[int, float] = {}
+DEL_TTL = 300
+
 
 def _menu(is_admin: bool) -> list[list[str]]:
-    """Главное меню: кнопка выдачи кода — только для админа."""
+    """Главное меню: кнопки выдачи кода и удаления рассылки — только для админа."""
     if is_admin:
-        return [[CONNECT_TV_BUTTON], [ISSUE_CODE_BUTTON]]
+        return [[CONNECT_TV_BUTTON], [ISSUE_CODE_BUTTON], [DELETE_LAST_BUTTON]]
     return [list(TV_MENU[0])]
 
 
@@ -138,33 +145,114 @@ async def _active_subscribers() -> list[str]:
         return [row[0] for row in res.all()]
 
 
-async def _save_news(text: str) -> None:
+async def _save_news(text: str) -> int | None:
     """Сохранить новость в БД — она попадёт в колокольчик на сайте."""
     try:
         from app.database import async_session
         from app.models import News
 
         async with async_session() as db:
-            db.add(News(text=text))
+            row = News(text=text)
+            db.add(row)
+            await db.flush()
+            news_id = row.id
             await db.commit()
+            return news_id
     except Exception as e:
         logger.warning("news save failed: %s", e)
+        return None
 
 
 async def broadcast(text: str) -> tuple[int, int]:
     """Send text to all active subscribers. Returns (sent, failed)."""
     # Всё, что видят все подписчики бота, попадает и на сайт (колокольчик)
-    await _save_news(text)
+    from app.database import async_session
+    from app.models import Broadcast, BroadcastDelivery
+
+    news_id = await _save_news(text)
+    async with async_session() as db:
+        bcast = Broadcast(news_id=news_id, text=text)
+        db.add(bcast)
+        await db.flush()
+        bcast_id = bcast.id
+        await db.commit()
+
     chat_ids = await _active_subscribers()
     sent = failed = 0
+    deliveries: list[BroadcastDelivery] = []
     for cid in chat_ids:
-        if await send_message(cid, text):
+        message_id = await send_message(cid, text)
+        if message_id:
             sent += 1
+            deliveries.append(
+                BroadcastDelivery(
+                    broadcast_id=bcast_id, chat_id=str(cid), message_id=message_id
+                )
+            )
         else:
             failed += 1
         await asyncio.sleep(0.05)  # stay well under Telegram rate limits
+    if deliveries:
+        async with async_session() as db:
+            db.add_all(deliveries)
+            await db.commit()
     logger.info("Broadcast: sent=%d failed=%d", sent, failed)
     return sent, failed
+
+
+async def _delete_last_broadcast() -> str:
+    """Отозвать последнюю рассылку: deleteMessage из чатов TG + новость с сайта."""
+    from sqlalchemy import delete as sql_delete, desc, select
+
+    from app.database import async_session
+    from app.models import Broadcast, BroadcastDelivery, News
+
+    async with async_session() as db:
+        res = await db.execute(select(Broadcast).order_by(desc(Broadcast.id)).limit(1))
+        bcast = res.scalar_one_or_none()
+        if not bcast:
+            return "📋 В журнале нет рассылок — удалять нечего."
+        dres = await db.execute(
+            select(BroadcastDelivery).where(BroadcastDelivery.broadcast_id == bcast.id)
+        )
+        deliveries = dres.scalars().all()
+
+    ok = bad = 0
+    for d in deliveries:
+        data = await _call(
+            "deleteMessage", {"chat_id": d.chat_id, "message_id": d.message_id}
+        )
+        if data and data.get("ok"):
+            ok += 1
+        else:
+            bad += 1
+        await asyncio.sleep(0.05)
+
+    async with async_session() as db:
+        if bcast.news_id:
+            await db.execute(sql_delete(News).where(News.id == bcast.news_id))
+        await db.execute(
+            sql_delete(BroadcastDelivery).where(
+                BroadcastDelivery.broadcast_id == bcast.id
+            )
+        )
+        await db.execute(sql_delete(Broadcast).where(Broadcast.id == bcast.id))
+        await db.commit()
+
+    preview = bcast.text or ""
+    if len(preview) > 150:
+        preview = preview[:150] + "…"
+    out = [f"🗑 Рассылка удалена:\n«{preview}»\n", f"Из чатов Telegram: удалено {ok}"]
+    if bad:
+        out.append(
+            f"не удалено {bad} (Telegram хранит сообщения только 48 часов после отправки)"
+        )
+    out.append(
+        "Колокольчик на сайте: новость снята"
+        if bcast.news_id
+        else "Колокольчик: новость на сайте не найдена"
+    )
+    return "\n".join(out)
 
 
 async def _handle_message(msg: dict) -> None:
@@ -204,6 +292,7 @@ async def _handle_message(msg: dict) -> None:
         if not is_admin:
             await send_message(chat_id, "Команда доступна только администратору.")
             return
+        _delpending.pop(chat_id, None)
         _tvcode_pending[chat_id] = time.time()
         await send_message(
             chat_id,
@@ -213,6 +302,45 @@ async def _handle_message(msg: dict) -> None:
             "чтобы передать их человеку вручную.\n\n"
             f"Ваш chat_id: {chat_id}\n"
             "Отмена — /cancel",
+            keyboard=_menu(is_admin),
+        )
+        return
+
+    # удалить последнюю рассылку — только для админа
+    if text == DELETE_LAST_BUTTON:
+        if not is_admin:
+            await send_message(chat_id, "Команда доступна только администратору.")
+            return
+        _tvcode_pending.pop(chat_id, None)
+        from sqlalchemy import desc, select
+
+        from app.database import async_session
+        from app.models import Broadcast
+
+        async with async_session() as db:
+            res = await db.execute(
+                select(Broadcast).order_by(desc(Broadcast.id)).limit(1)
+            )
+            last = res.scalar_one_or_none()
+        if not last:
+            await send_message(
+                chat_id,
+                "📋 В журнале нет рассылок — удалять нечего.\n"
+                "(Журнал ведётся с этого обновления; старые рассылки в нём нет.)",
+                keyboard=_menu(is_admin),
+            )
+            return
+        _delpending[chat_id] = time.time()
+        preview = last.text or ""
+        if len(preview) > 300:
+            preview = preview[:300] + "…"
+        await send_message(
+            chat_id,
+            "🗑 Удалить последнюю рассылку?\n\n"
+            f"«{preview}»\n\n"
+            "Она исчезнет из чатов Telegram (Telegram позволяет удалить "
+            "сообщения в течение 48 часов после отправки) и из колокольчика на сайте.\n\n"
+            "Ответьте «да» для удаления. Отмена — /cancel",
             keyboard=_menu(is_admin),
         )
         return
@@ -271,6 +399,24 @@ async def _handle_message(msg: dict) -> None:
                 f"Код для chat_id {target}:\n{code}",
                 keyboard=_menu(is_admin),
             )
+        return
+
+    # админ подтверждает удаление последней рассылки
+    if is_admin and chat_id in _delpending:
+        if time.time() - _delpending[chat_id] > DEL_TTL:
+            _delpending.pop(chat_id, None)
+            await send_message(chat_id, "⏱ Время истекло — нажмите «Удалить последнюю рассылку» заново.", keyboard=_menu(is_admin))
+            return
+        if cmd == "/cancel" or text.lower() in ("отмена", "cancel"):
+            _delpending.pop(chat_id, None)
+            await send_message(chat_id, "Отменено.", keyboard=_menu(is_admin))
+            return
+        if text.lower() in ("да", "yes", "y", "удали", "удалить"):
+            _delpending.pop(chat_id, None)
+            report = await _delete_last_broadcast()
+            await send_message(chat_id, report, keyboard=_menu(is_admin))
+            return
+        await send_message(chat_id, "Чтобы удалить рассылку — ответьте «да». Отмена — /cancel.")
         return
 
     if cmd == "/start":

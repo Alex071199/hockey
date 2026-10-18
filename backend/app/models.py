@@ -70,3 +70,23 @@ class News(Base):
     created_at = Column(DateTime, default=func.now())
     # момент, когда колокольчик открыл пользователь (для TTL 24ч после просмотра)
     last_seen_at = Column(DateTime, nullable=True)
+
+
+class Broadcast(Base):
+    __tablename__ = "broadcasts"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    news_id = Column(Integer, nullable=True, index=True)
+    text = Column(String)
+    created_at = Column(DateTime, default=func.now())
+
+
+class BroadcastDelivery(Base):
+    __tablename__ = "broadcast_deliveries"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    broadcast_id = Column(Integer, index=True)
+    chat_id = Column(String, index=True)
+    message_id = Column(Integer)
