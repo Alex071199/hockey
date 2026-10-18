@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import HlsVideo from "@/components/HlsVideo";
 
 export interface MatchStatsData {
@@ -31,8 +31,8 @@ export interface MatchStatsData {
     m3u8_url: string;
     name?: string;
   } | null;
-  /** НХЛ: обзор матча (ролики Brightcove с nhl.com) — рендерится на странице
-   *  матча отдельным блоком после счёта, перед статистикой и составами. */
+  /** НХЛ: обзор матча (ролики Brightcove с nhl.com) — рендерится в этой же
+   *  статистике после шапки со счётом, перед вкладками «Статистика/Составы». */
   highlights?: {
     video_id: string;
     slug?: string;
@@ -305,6 +305,23 @@ export default function MatchStats({ data, tabs = false }: { data: MatchStatsDat
   const goals = data.goals ?? [];
   const penalties = data.penalties ?? [];
 
+  const hlCount = data.highlights?.length ?? 0;
+  const hlWrapRef = useRef<HTMLDivElement>(null);
+  const [hlHeight, setHlHeight] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    const el = hlWrapRef.current;
+    if (!el || hlCount === 0) return;
+    const calc = () => {
+      const pageTop = el.getBoundingClientRect().top + window.scrollY;
+      const avail = window.innerHeight - pageTop - 24;
+      setHlHeight(avail >= 200 ? Math.round(avail) : null);
+    };
+    calc();
+    window.addEventListener("resize", calc);
+    return () => window.removeEventListener("resize", calc);
+  }, [hlCount]);
+
   const statsSections = (
     <>
       <section className="glass rounded-2xl p-4 sm:p-6">
@@ -389,7 +406,11 @@ export default function MatchStats({ data, tabs = false }: { data: MatchStatsDat
       {(data.highlights?.length ?? 0) > 0 && (
         <section>
           <h3 className="text-sm font-extrabold uppercase tracking-wide mb-3">Обзор матча</h3>
-          <div className="relative left-1/2 -translate-x-1/2 w-screen aspect-video bg-black border-y border-hockey-border">
+          <div
+            ref={hlWrapRef}
+            className="relative left-1/2 -translate-x-1/2 w-screen aspect-video bg-black border-y border-hockey-border"
+            style={hlHeight ? { height: `${hlHeight}px` } : undefined}
+          >
             {data.highlights!.map((h) => (
               <iframe
                 key={h.video_id}
