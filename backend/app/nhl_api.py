@@ -6,6 +6,7 @@
 """
 
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -29,6 +30,24 @@ SCORE_TTL = 600        # расписание дня
 SCORE_LIVE_TTL = 30    # live-обновления счёта
 STATS_TTL = 300        # статистика завершённого матча
 STATS_LIVE_TTL = 15    # статистика live-матча
+
+# Обзоры игр (recap) НХЛ публикует как обычные видео на nhl.com; api-web.nhle.com
+# про видео не знает, поэтому индекс строим из HTML-страниц, где перечислены
+# ролики: топика game-recaps + видео-сайтмап. Slug вида 'stl-at-nsh-recap'
+# несёт 13-значный id ролика — он играет во встроенном плеере Brightcove.
+_RECAP_TOPIC_URL = "https://www.nhl.com/video/topic/game-recaps/"
+_RECAP_SITEMAP_URL = "https://www.nhl.com/sitemap/sitemap-videos.xml"
+BRIGHTCOVE_ACCOUNT = "6415718365001"
+RECAP_INDEX_TTL = 1800  # перечитываем индекс не чаще раза в полчаса
+# Ловим только основной путь www.nhl.com/video/... (и топик video/topic/...):
+# командные копии вида /blues/video/... — отдельные ролики с чужими id.
+_RECAP_RE = re.compile(
+    r"(?<![a-z0-9])(?:https?://www\.nhl\.com)?/video/(?:topic/game-recaps/)?"
+    r"([a-z0-9]+(?:-at-|-vs-)[a-z0-9]+-recap)-(\d{13})"
+)
+
+_recap_index: dict[str, str] = {}
+_recap_index_at = 0.0
 
 # API даёт только англ. abbrev — русские имена берём из той же карты,
 # что и ключи team-logos.ts (точно совпадают с именами в БД от 1win).
@@ -276,6 +295,54 @@ def find_game_by_pair(
     return best
 
 
+async def _load_recap_index() -> dict[str, str]:
+    """Индекс обзоров: slug игры ('stl-at-nsh-recap') -> id ролика Brightcove.
+
+    Источники — HTML-страницы nhl.com: топик game-recaps хранит обзоры
+    за последние дни, сайтмап дополняет его самыми свежими публикациями.
+    """
+    global _recap_index_at, _recap_index
+    now = time.monotonic()
+    if now - _recap_index_at < RECAP_INDEX_TTL:
+        return _recap_index
+    found: dict[str, str] = {}
+    for url in (_RECAP_TOPIC_URL, _RECAP_SITEMAP_URL):
+        try:
+            async with httpx.AsyncClient(timeout=20, headers=_HEADERS) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+            for m in _RECAP_RE.finditer(resp.text.replace("\\/", "/")):
+                found[m.group(1)] = m.group(2)
+        except Exception as e:
+            logger.warning("NHL recap index: fetch %s failed: %s", url, e)
+    if found:
+        _recap_index = found
+    _recap_index_at = now
+    return _recap_index
+
+
+async def get_game_recap(away_abbrev: str, home_abbrev: str) -> dict | None:
+    """Видео-обзор игры: '{away}-at-{home}-recap' -> id и ссылка плеера."""
+    if not (away_abbrev and home_abbrev):
+        return None
+    index = await _load_recap_index()
+    if not index:
+        return None
+    away, home = away_abbrev.lower(), home_abbrev.lower()
+    for slug in (f"{away}-at-{home}-recap", f"{away}-vs-{home}-recap"):
+        video_id = index.get(slug)
+        if video_id:
+            return {
+                "video_id": video_id,
+                "slug": slug,
+                "embed_url": (
+                    f"https://players.brightcove.net/{BRIGHTCOVE_ACCOUNT}"
+                    f"/default_default/index.html?videoId={video_id}&applicationId=nhl"
+                ),
+            }
+    return None
+
+
 async def get_match_stats(
     home: str, away: str, date_str: str, live: bool = False, uid: str | None = None
 ) -> dict:
@@ -519,6 +586,17 @@ async def _build_match_stats(
                 })
         return out
 
+    # Хайлайты (обзор матча) — только у завершённых игр: ролик появляется
+    # на nhl.com через несколько минут после финальной сирены.
+    highlights: list[dict] = []
+    if not live and status not in ("live", "break", "pre_game"):
+        try:
+            recap = await get_game_recap(a_abbrev, h_abbrev)
+            if recap:
+                highlights.append(recap)
+        except Exception as e:
+            logger.warning("NHL recap lookup failed (%s@%s): %s", a_abbrev, h_abbrev, e)
+
     return {
         "league": "NHL",
         "event_id": game_id,
@@ -543,7 +621,8 @@ async def _build_match_stats(
             "home": _roster(h_pb, h_abbrev),
             "away": _roster(a_pb, a_abbrev),
         },
-        # у НХЛ «Обзор матча» из этого API не приходит
+        # у КХЛ обзор идёт m3u8 из API КХЛ, у НХЛ — ролики Brightcove с nhl.com
         "highlight": None,
+        "highlights": highlights,
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }

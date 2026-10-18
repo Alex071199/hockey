@@ -174,9 +174,17 @@ export default function MatchPage() {
             if (isLive) {
               schedule(30000);
             } else if (isNhl) {
-              // «Обзор матча» у НХЛ из этого API не приходит — одна загрузка
-              if (timer) clearInterval(timer);
-              timer = undefined;
+              // Обзор НХЛ (highlights) появляется на nhl.com через несколько
+              // минут после финала: для свежих игр повторяем раз в минуту
+              // (до 15 раз), старые грузим одним запросом
+              const freshGame =
+                Date.now() - parseMatchDate(match.datetime_utc).getTime() < 6 * 60 * 60 * 1000;
+              if (s.highlights?.length || !freshGame || hlAttempts++ >= 15) {
+                if (timer) clearInterval(timer);
+                timer = undefined;
+              } else {
+                schedule(60000);
+              }
             } else if (s.highlight?.m3u8_url) {
               if (timer) clearInterval(timer);
               timer = undefined;
@@ -396,6 +404,27 @@ export default function MatchPage() {
           {parseMatchDate(match.datetime_utc).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}
         </p>
 
+        {match.status === "finished" && match.league === "NHL" && stats && (stats.highlights?.length ?? 0) > 0 && (
+          <div className="mb-4 sm:mb-6">
+            <p className="text-[10px] sm:text-xs text-hockey-text-muted mb-2 uppercase tracking-wider font-bold">
+              Обзор матча
+            </p>
+            <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-hockey-card border border-hockey-border">
+              {stats.highlights!.map((h) => (
+                <iframe
+                  key={h.video_id}
+                  src={h.embed_url}
+                  title="Обзор матча НХЛ"
+                  allow="autoplay; fullscreen; picture-in-picture"
+                  allowFullScreen
+                  loading="lazy"
+                  className="absolute inset-0 w-full h-full border-0"
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         {match.status === "finished" && (match.league === "KHL" || match.league === "NHL") && (
           <div className="mt-2">
             {statsLoading && (
@@ -413,8 +442,9 @@ export default function MatchPage() {
             {stats && <MatchStats data={stats} tabs />}
           </div>
         )}
-        {/* у НХЛ finished запись с плеером остаётся под статистикой */}
-        {!(match.status === "finished" && match.league === "KHL") && (
+        {/* завершённые КХЛ/НХЛ — без плеера трансляции: у КХЛ обзор идёт
+            внутри статистики, у НХЛ — хайлайты блоком после счёта */}
+        {!(match.status === "finished" && (match.league === "KHL" || match.league === "NHL")) && (
           <>
             {sortedStreams.length > 0 && (
               <div className="flex flex-nowrap gap-2 mb-3 sm:mb-4 overflow-x-auto pb-1 scrollbar-hide">

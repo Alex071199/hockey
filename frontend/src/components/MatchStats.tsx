@@ -31,6 +31,13 @@ export interface MatchStatsData {
     m3u8_url: string;
     name?: string;
   } | null;
+  /** НХЛ: обзор матча (ролики Brightcove с nhl.com) — рендерится на странице
+   *  матча отдельным блоком после счёта, перед статистикой и составами. */
+  highlights?: {
+    video_id: string;
+    slug?: string;
+    embed_url: string;
+  }[];
 }
 
 interface RosterPlayer {
