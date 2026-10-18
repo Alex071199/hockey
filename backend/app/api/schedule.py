@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_serializer
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -66,7 +66,15 @@ async def get_schedule(
         start = datetime.combine(today, datetime.min.time())
         end = start + timedelta(days=2)
 
-    query = select(Match).where(Match.datetime_utc >= start, Match.datetime_utc < end)
+    # Идущие матчи не пропадают из выдачи: поздние игры НХЛ (23:00+ UTC)
+    # ещё идут после полуночи — строгое окно по дате их обрезало, из-за
+    # чего на 1win была трансляция, а у нас матч не отображался.
+    query = select(Match).where(
+        or_(
+            and_(Match.datetime_utc >= start, Match.datetime_utc < end),
+            Match.status == "live",
+        )
+    )
 
     if league:
         query = query.where(Match.league == league.upper())

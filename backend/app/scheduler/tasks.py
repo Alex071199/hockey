@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select, delete, or_, and_
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import async_session
@@ -311,6 +312,40 @@ def _is_regular_nhl_row(home: str, away: str) -> bool:
     return _NICK_RE.search(names) is None
 
 
+def _pair_key(home: str | None, away: str | None) -> tuple[str, str]:
+    return ((home or "").casefold().strip(), (away or "").casefold().strip())
+
+
+def _win_id_of(row: Match) -> int:
+    try:
+        return int((row.match_uid or "").split("_", 1)[1])
+    except (ValueError, IndexError):
+        return -1
+
+
+def _find_nhl_twin(rows: list[Match], dt: datetime | None) -> Match | None:
+    """Строка того же матча, если игра перевыпустилась в линии под новым
+    WIN-id: та же пара команд и близкое время старта (±6 часов)."""
+    if not dt:
+        return None
+    best: Match | None = None
+    for r in rows:
+        if not r.datetime_utc:
+            continue
+        if abs((r.datetime_utc - dt).total_seconds()) > 6 * 3600:
+            continue
+        if best is None or (bool(r.stream_urls), r.updated_at or datetime.min) > (
+            bool(best.stream_urls),
+            best.updated_at or datetime.min,
+        ):
+            best = r
+    return best
+
+
+# одиночные попытки дозапроса broadcast, когда WS в цикле не дал ссылки
+_bc_fallback_at: dict[int, float] = {}
+
+
 async def _win_stream(
     win_id: int, broadcast_url: str | None = None
 ) -> list[dict]:
@@ -398,6 +433,7 @@ async def sync_win_nhl() -> None:
         snaps = {}
 
     changed_ids: list[int] = []
+    fallback_budget = 1
     async with async_session() as db:
         # Мусор (реплеи/киберспорт) убираем двумя способами: по id из линии
         # (rejected) и по содержимому самой строки — id мог уже выйти из линии.
@@ -406,16 +442,26 @@ async def sync_win_nhl() -> None:
             .scalars()
             .all()
         )
+        junk_ids: set[int] = set()
         for row in nhl_rows:
             junk = row.match_uid in rejected or not _is_regular_nhl_row(
                 row.team_home or "", row.team_away or ""
             )
             if junk:
                 await db.delete(row)
+                junk_ids.add(row.id)
                 logger.info(
                     "NHL: dropped %s - %s (не регулярный чемпионат)",
                     row.team_home, row.team_away,
                 )
+        # пары команд -> строки: для поиска «того же матча» при перевыпуске id
+        pair_index: dict[tuple[str, str], list[Match]] = {}
+        for row in nhl_rows:
+            if row.id in junk_ids:
+                continue
+            pair_index.setdefault(_pair_key(row.team_home, row.team_away), []).append(row)
+        # flush: следующий SELECT (слияние дублей) не должен вернуть мусор
+        await db.flush()
 
         for item in nhl:
             win_id = item["id"]
@@ -432,6 +478,20 @@ async def sync_win_nhl() -> None:
 
             res = await db.execute(select(Match).where(Match.match_uid == uid))
             existing = res.scalar_one_or_none()
+            home = (item.get("homeTeam") or {}).get("name", "")
+            away = (item.get("awayTeam") or {}).get("name", "")
+
+            if existing is None:
+                # игра могла перевыпуститься в линии под новым WIN-id — тогда
+                # обновляем старую строку, а не создаём вторую (будет дубль)
+                twin = _find_nhl_twin(pair_index.get(_pair_key(home, away), []), dt)
+                if twin is not None:
+                    logger.info(
+                        "NHL: %s - %s перевыпущен в линии: %s -> %s, сливаем",
+                        twin.team_home, twin.team_away, twin.match_uid, uid,
+                    )
+                    twin.match_uid = uid
+                    existing = twin
 
             home_score = snap.get("home_score")
             away_score = snap.get("away_score")
@@ -439,15 +499,26 @@ async def sync_win_nhl() -> None:
             # Стрим ставим только когда WS подтвердил broadcast.url и плеер
             # отдал источник — иначе карточка ведёт в пустой плеер.
             stream: list[dict] | None = None
-            if status == "live" and snap.get("broadcast"):
-                stream = await _win_stream(win_id, snap["broadcast"])
+            if status == "live":
+                if snap.get("broadcast"):
+                    stream = await _win_stream(win_id, snap["broadcast"])
+                elif (
+                    fallback_budget > 0
+                    and not (existing and existing.stream_urls)
+                    and time.time() - _bc_fallback_at.get(win_id, 0.0) > 300.0
+                ):
+                    # WS в этом цикле не дал broadcast — одна одиночная попытка
+                    # (кэш _get_state не даёт долбить плеер чаще5 минут)
+                    _bc_fallback_at[win_id] = time.time()
+                    fallback_budget -= 1
+                    stream = await _win_stream(win_id)
 
             if existing is None:
                 new_match = Match(
                     match_uid=uid,
                     league="NHL",
-                    team_home=(item.get("homeTeam") or {}).get("name", ""),
-                    team_away=(item.get("awayTeam") or {}).get("name", ""),
+                    team_home=home,
+                    team_away=away,
                     datetime_utc=dt,
                     status=status,
                     added_live=(status == "live"),
@@ -459,6 +530,7 @@ async def sync_win_nhl() -> None:
                 db.add(new_match)
                 await db.flush()
                 changed_ids.append(new_match.id)
+                pair_index.setdefault(_pair_key(home, away), []).append(new_match)
                 logger.info(
                     "NHL: added %s - %s [%s]",
                     new_match.team_home, new_match.team_away, status,
@@ -494,11 +566,96 @@ async def sync_win_nhl() -> None:
             if dirty:
                 changed_ids.append(existing.id)
 
+        # дубли, накопленные до фикса (одна игра под разными WIN-id)
+        await _merge_nhl_duplicates(db, set(ids), changed_ids)
+
         await db.commit()
 
     if changed_ids:
         await _broadcast_matches(changed_ids)
         logger.info("NHL: updated %d matches", len(set(changed_ids)))
+
+
+async def _merge_nhl_duplicates(
+    db: AsyncSession, line_ids: set[int], changed_ids: list[int]
+) -> int:
+    """Сливает накопившиеся дубли строк НХЛ одной игры.
+
+    Одна игра могла быть в линии под разными WIN-id (переиздание карточки):
+    на один id пришла строка со стримом, на другой — без. Канон — строка из
+    текущей линии (она продолжает получать обновления), её и оставляем.
+    """
+    rows = (
+        (await db.execute(select(Match).where(Match.league == "NHL")))
+        .scalars()
+        .all()
+    )
+    groups: dict[tuple[str, str], list[Match]] = {}
+    for r in rows:
+        if not r.datetime_utc:
+            continue
+        groups.setdefault(_pair_key(r.team_home, r.team_away), []).append(r)
+
+    merged = 0
+    for arr in groups.values():
+        if len(arr) < 2:
+            continue
+        arr.sort(key=lambda r: r.datetime_utc)
+        cluster = [arr[0]]
+        for r in arr[1:]:
+            if (r.datetime_utc - cluster[-1].datetime_utc) <= timedelta(hours=6):
+                cluster.append(r)
+                continue
+            merged += await _merge_nhl_cluster(db, cluster, line_ids, changed_ids)
+            cluster = [r]
+        merged += await _merge_nhl_cluster(db, cluster, line_ids, changed_ids)
+    return merged
+
+
+async def _merge_nhl_cluster(
+    db: AsyncSession, arr: list[Match], line_ids: set[int], changed_ids: list[int]
+) -> int:
+    if len(arr) < 2:
+        return 0
+
+    def rank(r: Match) -> tuple:
+        return (
+            _win_id_of(r) in line_ids,
+            bool(r.stream_urls),
+            r.updated_at or datetime.min,
+        )
+
+    arr.sort(key=rank, reverse=True)
+    main, dups = arr[0], arr[1:]
+    main_win = _win_id_of(main)
+    merged = 0
+    for d in dups:
+        d_win = _win_id_of(d)
+        have = {s.get("url") for s in (main.stream_urls or [])}
+        fresh: list[dict] = []
+        for s in d.stream_urls or []:
+            url = s.get("url") or ""
+            # HLS-адрес привязан к WIN-id старой карточки — переписываем
+            # на id канонической строки, иначе прокси его не разрешит
+            if d_win >= 0 and main_win >= 0 and d_win != main_win:
+                url = url.replace(
+                    f"/api/broadcast/{d_win}/stream.m3u8",
+                    f"/api/broadcast/{main_win}/stream.m3u8",
+                )
+            if url not in have:
+                have.add(url)
+                fresh.append({**s, "url": url})
+        if fresh:
+            main.stream_urls = list(main.stream_urls or []) + fresh
+            if main.id not in changed_ids:
+                changed_ids.append(main.id)
+        logger.info(
+            "NHL: merged dup %s -> %s (%s - %s)",
+            d.match_uid, main.match_uid, d.team_home, d.team_away,
+        )
+        await db.delete(d)
+        merged += 1
+    return merged
 
 
 # --- PRIME как дополнительный источник для КХЛ/МХЛ/ВХЛ ------------------------
