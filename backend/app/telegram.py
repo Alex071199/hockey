@@ -208,8 +208,10 @@ async def _handle_message(msg: dict) -> None:
         await send_message(
             chat_id,
             "🔑 Выдача кода активации ТВ\n\n"
-            f"Пришлите chat_id получателя (число).\n"
-            f"Чтобы выдать себе — ваш chat_id: {chat_id}\n\n"
+            "Пришлите chat_id получателя (число),\n"
+            "либо «мне» или «мне 3» — коды придут прямо в этот чат,\n"
+            "чтобы передать их человеку вручную.\n\n"
+            f"Ваш chat_id: {chat_id}\n"
             "Отмена — /cancel",
             keyboard=_menu(is_admin),
         )
@@ -224,6 +226,24 @@ async def _handle_message(msg: dict) -> None:
         if cmd == "/cancel" or text.lower() in ("отмена", "cancel"):
             _tvcode_pending.pop(chat_id, None)
             await send_message(chat_id, "Отменено.", keyboard=_menu(is_admin))
+            return
+        words = text.lower().split()
+        if words and words[0] in ("мне", "себе", "самому", "сам"):
+            count = 1
+            if len(words) > 1 and words[1].isdigit():
+                count = max(1, min(int(words[1]), 20))
+            _tvcode_pending.pop(chat_id, None)
+            from app.api.tv_auth import issue_tv_code
+
+            codes = [issue_tv_code(chat_id) for _ in range(count)]
+            listed = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(codes))
+            await send_message(
+                chat_id,
+                "🔑 Коды для передачи вручную (по одному на ТВ):\n\n"
+                + listed
+                + "\n\nКаждый код одноразовый.",
+                keyboard=_menu(is_admin),
+            )
             return
         if not (text.isdigit() or (text.startswith("-") and text[1:].isdigit())):
             await send_message(chat_id, "chat_id должен быть числом. Отправьте число или /cancel.")
@@ -312,6 +332,14 @@ async def _handle_message(msg: dict) -> None:
             return
         from app.api.tv_auth import issue_tv_code
 
+        if len(parts) > 1 and parts[1].lower() in ("мне", "себе"):
+            count = 1
+            if len(parts) > 2 and parts[2].isdigit():
+                count = max(1, min(int(parts[2]), 20))
+            codes = [issue_tv_code(chat_id) for _ in range(count)]
+            listed = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(codes))
+            await send_message(chat_id, f"🔑 Коды (одноразовые, по одному на ТВ):\n{listed}")
+            return
         target = parts[1] if len(parts) > 1 else str(chat_id)
         code = issue_tv_code(target)
         await send_message(chat_id, f"🔑 Код для chat_id {target}: {code}\n(одноразовый, лежит в tv_codes.json)")
