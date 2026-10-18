@@ -36,6 +36,7 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_add_missing_columns)
+        await conn.run_sync(_migrate_news_autoincrement)
 
 
 def _add_missing_columns(bind) -> None:
@@ -76,3 +77,38 @@ def _add_missing_columns(bind) -> None:
             bind.execute(text(stmt))
         except Exception:
             pass
+
+
+def _migrate_news_autoincrement(bind) -> None:
+    """SQLite без AUTOINCREMENT переиспользует id после полной очистки таблицы
+    news (новости снова получают id с 1, а колокольчик на сайте сравнивает их
+    со старым seen_id) — пересоздаём таблицу с AUTOINCREMENT."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(bind)
+    if "news" not in inspector.get_table_names():
+        return
+    ddl = bind.execute(
+        text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'news'")
+    ).scalar()
+    if not ddl or "AUTOINCREMENT" in ddl.upper():
+        return
+    stmts = [
+        "DROP TABLE IF EXISTS news_new",
+        """CREATE TABLE news_new (
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            text VARCHAR,
+            created_at DATETIME,
+            last_seen_at DATETIME
+        )""",
+        """INSERT INTO news_new (id, text, created_at, last_seen_at)
+            SELECT id, text, created_at, last_seen_at FROM news""",
+        "DROP TABLE news",
+        "ALTER TABLE news_new RENAME TO news",
+    ]
+    try:
+        for stmt in stmts:
+            bind.execute(text(stmt))
+    except Exception:
+        # DDL в SQLite транзакционен — откатываем, оставляем таблицу как была
+        bind.rollback()

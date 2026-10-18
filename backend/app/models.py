@@ -63,6 +63,7 @@ class Donation(Base):
 
 class News(Base):
     __tablename__ = "news"
+    __table_args__ = {"sqlite_autoincrement": True}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     text = Column(String)

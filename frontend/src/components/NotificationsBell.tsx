@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 const SEEN_KEY = "hl_news_seen_id";
+const SEEN_AT_KEY = "hl_news_seen_at";
 
 interface NewsItem {
   id: number;
@@ -27,11 +28,21 @@ export default function NotificationsBell() {
   const [news, setNews] = useState<NewsItem[]>([]);
   const [open, setOpen] = useState(false);
   const [seenId, setSeenId] = useState(0);
+  const [seenAt, setSeenAt] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const stored = Number(localStorage.getItem(SEEN_KEY) || 0);
     if (!Number.isNaN(stored)) setSeenId(stored);
+    // миграция: раньше просмотр считался по id новости, теперь по времени
+    const at = Number(localStorage.getItem(SEEN_AT_KEY) || 0);
+    if (at > 0) {
+      setSeenAt(at);
+    } else if (!Number.isNaN(stored) && stored > 0) {
+      const now = Date.now();
+      setSeenAt(now);
+      localStorage.setItem(SEEN_AT_KEY, String(now));
+    }
   }, []);
 
   const load = useCallback(() => {
@@ -60,15 +71,29 @@ export default function NotificationsBell() {
     return () => document.removeEventListener("mousedown", onClick);
   }, [open]);
 
-  const unread = news.filter((n) => n.id > seenId).length;
+  // id > seenId — запас на случай, если id вдруг начнутся заново;
+  // created_at > seenAt — надёжный признак «новое после последнего просмотра»
+  const isNew = (n: NewsItem) =>
+    n.id > seenId || (!!n.created_at && Date.parse(n.created_at) > seenAt);
+
+  const unread = news.filter(isNew).length;
 
   function toggle() {
     const next = !open;
     setOpen(next);
     if (next && news.length > 0) {
       const maxId = Math.max(...news.map((n) => n.id), seenId);
+      // считаем просмотренным всё, что уже показано, даже если часы
+      // браузера и сервера немного расходятся
+      const maxCreated = news.reduce(
+        (m, n) => Math.max(m, n.created_at ? Date.parse(n.created_at) || 0 : 0),
+        0
+      );
+      const nextSeenAt = Math.max(Date.now(), maxCreated);
       setSeenId(maxId);
+      setSeenAt(nextSeenAt);
       localStorage.setItem(SEEN_KEY, String(maxId));
+      localStorage.setItem(SEEN_AT_KEY, String(nextSeenAt));
       // сервер помечает просмотренными — через 24 часа они удалятся
       fetch(`${API_URL}/api/news/seen`, {
         method: "POST",
@@ -122,7 +147,7 @@ export default function NotificationsBell() {
                 <li
                   key={n.id}
                   className={`relative px-4 pr-9 py-3 border-b border-hockey-border/60 last:border-b-0 ${
-                    n.id > seenId ? "bg-hockey-accent/5" : ""
+                    isNew(n) ? "bg-hockey-accent/5" : ""
                   }`}
                 >
                   <p className="text-sm text-white whitespace-pre-wrap break-words leading-relaxed">

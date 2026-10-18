@@ -5,7 +5,6 @@ import Link from "next/link";
 
 const APK_URL =
   "https://github.com/Alex071199/hockey/releases/latest/download/HockeyLiveTV.apk";
-const GITHUB_RELEASES = "https://github.com/Alex071199/hockey/releases";
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 
 const steps = [
@@ -49,7 +48,7 @@ export default function DownloadPage() {
         </h1>
         <p className="text-hockey-text-secondary text-sm sm:text-base mb-8">
           Матчи КХЛ, ВХЛ, МХЛ и НХЛ на большом экране — с той же статистикой,
-          что и на сайте. Для Android-смартфонов и Android TV.
+          что и на сайте. Только для Smart TV.
         </p>
 
         <div className="bg-hockey-card border border-hockey-border rounded-2xl p-6 sm:p-8 mb-8">
@@ -73,14 +72,6 @@ export default function DownloadPage() {
             {version ? `Текущая версия: ${version} · ` : ""}
             ссылка всегда ведёт на последнюю версию
           </p>
-          <a
-            href={GITHUB_RELEASES}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-block text-hockey-accent hover:text-hockey-accent-hover text-xs sm:text-sm mt-2 transition-colors"
-          >
-            Все версии на GitHub →
-          </a>
         </div>
 
         <div className="text-left bg-hockey-card border border-hockey-border rounded-2xl p-6 sm:p-8 mb-8">
