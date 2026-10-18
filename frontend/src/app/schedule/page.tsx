@@ -2,8 +2,9 @@
 
 import { useEffect, useState, useMemo } from "react";
 import MatchCard from "@/components/MatchCard";
-import KhlMatchCard from "@/components/KhlMatchCard";
+import KhlMatchCard, { mskToLocal } from "@/components/KhlMatchCard";
 import { parseMatchDate } from "@/lib/parse-date";
+import { localDateKey, tzOffsetMinutes } from "@/lib/local-date";
 import DateSelector from "@/components/DateSelector";
 import TeamSearch from "@/components/TeamSearch";
 import FavoritesFilter from "@/components/FavoritesFilter";
@@ -46,7 +47,7 @@ interface Match {
 }
 
 export default function SchedulePage() {
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split("T")[0]);
+  const [selectedDate, setSelectedDate] = useState(localDateKey());
   const [league, setLeague] = useState<LeagueId>("KHL");
   const [searchedTeam, setSearchedTeam] = useState("");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
@@ -59,7 +60,7 @@ export default function SchedulePage() {
   const selectLeague = (l: LeagueId) => {
     setLeague(l);
     setSearchedTeam("");
-    setSelectedDate(new Date().toISOString().split("T")[0]);
+    setSelectedDate(localDateKey());
   };
 
   useEffect(() => {
@@ -76,7 +77,7 @@ export default function SchedulePage() {
       return;
     }
     setLoading(true);
-    fetch(`${API_URL}/api/schedule?date=${selectedDate}&league=${league}`)
+    fetch(`${API_URL}/api/schedule?date=${selectedDate}&league=${league}&tz_offset=${tzOffsetMinutes()}`)
       .then((r) => r.json())
       .then((data) => setApiMatches(Array.isArray(data) ? data : []))
       .catch(() => setApiMatches([]))
@@ -156,7 +157,7 @@ export default function SchedulePage() {
   const khlMatches = useMemo(() => {
     if (league !== "KHL") return [];
     return khlCalendarMatches
-      .filter((m) => m.date === selectedDate)
+      .filter((m) => localDateKey(mskToLocal(m.date, m.time)) === selectedDate)
       .sort((a, b) => a.time.localeCompare(b.time));
   }, [selectedDate, league, khlCalendarMatches]);
 

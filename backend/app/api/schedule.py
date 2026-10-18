@@ -48,6 +48,7 @@ async def get_schedule(
     date: str | None = None,
     status: str | None = None,
     in_schedule: bool | None = None,
+    tz_offset: int | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     # Datetimes are stored in UTC — build the default window in UTC too,
@@ -60,6 +61,13 @@ async def get_schedule(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
         start = datetime.combine(target_date, datetime.min.time())
+        # Клиент передаёт смещение своего пояса в минутах (UTC+6 → 360):
+        # тогда окно дня — полночь ПОЛЬЗОВАТЕЛЯ, и поздние игры НХЛ
+        # (04:00 по локали = 22:00 UTC предыдущего дня) встают на свой день.
+        if tz_offset is not None:
+            if not -720 <= tz_offset <= 840:
+                raise HTTPException(status_code=400, detail="tz_offset out of range.")
+            start -= timedelta(minutes=tz_offset)
         end = start + timedelta(days=1)
     else:
         today = now.date()

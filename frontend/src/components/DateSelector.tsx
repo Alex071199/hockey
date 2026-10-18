@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useEffect } from "react";
 import { useKhlCalendar } from "@/lib/khl-calendar";
+import { localDateKey } from "@/lib/local-date";
 
 interface DateSelectorProps {
   selected: string;
@@ -36,7 +37,7 @@ export default function DateSelector({ selected, onSelect }: DateSelectorProps) 
       const end = Math.min(allDates.length, idx + 8);
       return allDates.slice(start, end);
     }
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = localDateKey();
     let nearestIdx = 0;
     let minDiff = Infinity;
     for (let i = 0; i < allDates.length; i++) {
@@ -97,8 +98,7 @@ export default function DateSelector({ selected, onSelect }: DateSelectorProps) 
   }
 
   function isToday(dateStr: string): boolean {
-    const today = new Date().toISOString().split("T")[0];
-    return dateStr === today;
+    return dateStr === localDateKey();
   }
 
   return (
