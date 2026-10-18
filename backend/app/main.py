@@ -43,6 +43,9 @@ async def startup_scrape():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    from app.api.tv_auth import migrate_legacy_store
+
+    await migrate_legacy_store()
     if settings.SCHEDULER_ENABLED:
         setup_scheduler()
         asyncio.create_task(startup_scrape())

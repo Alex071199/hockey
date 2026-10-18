@@ -363,7 +363,7 @@ async def _handle_message(msg: dict) -> None:
             _tvcode_pending.pop(chat_id, None)
             from app.api.tv_auth import issue_tv_code
 
-            codes = [issue_tv_code(chat_id) for _ in range(count)]
+            codes = [await issue_tv_code(chat_id) for _ in range(count)]
             listed = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(codes))
             await send_message(
                 chat_id,
@@ -380,7 +380,7 @@ async def _handle_message(msg: dict) -> None:
         _tvcode_pending.pop(chat_id, None)
         from app.api.tv_auth import issue_tv_code
 
-        code = issue_tv_code(target)
+        code = await issue_tv_code(target)
         if target == chat_id:
             await send_message(chat_id, f"🔑 Ваш код: {code}\n\nОдноразовый — введите его на ТВ.", keyboard=_menu(is_admin))
             return
@@ -482,12 +482,12 @@ async def _handle_message(msg: dict) -> None:
             count = 1
             if len(parts) > 2 and parts[2].isdigit():
                 count = max(1, min(int(parts[2]), 20))
-            codes = [issue_tv_code(chat_id) for _ in range(count)]
+            codes = [await issue_tv_code(chat_id) for _ in range(count)]
             listed = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(codes))
             await send_message(chat_id, f"🔑 Коды (одноразовые, по одному на ТВ):\n{listed}")
             return
         target = parts[1] if len(parts) > 1 else str(chat_id)
-        code = issue_tv_code(target)
+        code = await issue_tv_code(target)
         await send_message(chat_id, f"🔑 Код для chat_id {target}: {code}\n(одноразовый, лежит в tv_codes.json)")
         return
 

@@ -146,9 +146,9 @@ async def yoomoney_webhook(
             return {"status": "ok"}
         if not tv_chat:
             return {"status": "ok"}
-        if not mark_payment_seen(operation_id):
+        if not await mark_payment_seen(operation_id):
             return {"status": "ok"}
-        code = issue_tv_code(tv_chat)
+        code = await issue_tv_code(tv_chat)
         from app.telegram import send_message
 
         await send_message(

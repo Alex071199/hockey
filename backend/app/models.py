@@ -90,3 +90,35 @@ class BroadcastDelivery(Base):
     broadcast_id = Column(Integer, index=True)
     chat_id = Column(String, index=True)
     message_id = Column(Integer)
+
+
+class TvCode(Base):
+    """Одноразовые коды активации ТВ.
+
+    Раньше лежали в tv_codes.json внутри контейнера Railway и пропадали
+    при каждом деплое — выданные коды «не подходили» на ТВ.
+    """
+
+    __tablename__ = "tv_codes"
+
+    code = Column(String, primary_key=True)
+    chat_id = Column(String, index=True)
+    created_at = Column(DateTime, default=func.now())
+
+
+class TvDevice(Base):
+    """Активированные ТВ-устройства (восстановление после обновления)."""
+
+    __tablename__ = "tv_devices"
+
+    device_id = Column(String, primary_key=True)
+    created_at = Column(DateTime, default=func.now())
+
+
+class TvPaymentOp(Base):
+    """Дедуп обработанных вебхуков ЮMoney."""
+
+    __tablename__ = "tv_payment_ops"
+
+    op_id = Column(String, primary_key=True)
+    created_at = Column(DateTime, default=func.now())
