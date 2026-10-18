@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app import khl_api
+from app import khl_api, nhl_api
 
 router = APIRouter(prefix="/api", tags=["results"])
 
@@ -53,7 +53,21 @@ async def get_match_stats(
     away: str = Query(default=""),
     event_id: int | None = Query(default=None),
     live: bool = Query(default=False),
+    uid: str | None = Query(default=None),
 ):
+    if league.upper() == "NHL":
+        # uid NHL_<game id> приходит со страницы матча — сразу game id;
+        # без него ищем игру по паре команд на дату (+-1 день из-за UTC)
+        date_str = _validate_date(date) if date else _default_date()
+        nhl_uid = uid or (f"NHL_{event_id}" if event_id else None)
+        try:
+            return await nhl_api.get_match_stats(
+                home, away, date_str, live=live, uid=nhl_uid
+            )
+        except LookupError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"NHL match stats error: {e}")
     if event_id:
         try:
             return await khl_api.get_match_stats_by_id(event_id, live=live)

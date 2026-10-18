@@ -140,15 +140,17 @@ export default function MatchPage() {
       .finally(() => setLoading(false));
   }, [params.league, params.id]);
 
-  // Live/finished KHL статистика: для live — автообновление раз в 30 секунд
+  // Live/finished KHL/NHL статистика: для live — автообновление раз в 30 секунд
   useEffect(() => {
-    if (!match || match.league !== "KHL") return;
-    if (match.status !== "live" && match.status !== "finished") return;
+    if (!match || (match.league !== "KHL" && match.league !== "NHL")) return;
+    if (match.status !== "live" && match.status !== "break" && match.status !== "finished") return;
     const date = (match.datetime_utc || "").slice(0, 10);
-    const isLive = match.status === "live";
+    const isLive = match.status === "live" || match.status === "break";
+    const isNhl = match.league === "NHL";
     const url =
-      `${API_URL}/api/match-stats?league=KHL&date=${date}` +
+      `${API_URL}/api/match-stats?league=${match.league}&date=${date}` +
       `&home=${encodeURIComponent(match.team_home)}&away=${encodeURIComponent(match.team_away)}` +
+      (match.match_uid ? `&uid=${encodeURIComponent(match.match_uid)}` : "") +
       (isLive ? "&live=1" : "");
     let stopped = false;
     setStatsLoading(true);
@@ -171,6 +173,10 @@ export default function MatchPage() {
             setStatsError(null);
             if (isLive) {
               schedule(30000);
+            } else if (isNhl) {
+              // «Обзор матча» у НХЛ из этого API не приходит — одна загрузка
+              if (timer) clearInterval(timer);
+              timer = undefined;
             } else if (s.highlight?.m3u8_url) {
               if (timer) clearInterval(timer);
               timer = undefined;
@@ -193,7 +199,7 @@ export default function MatchPage() {
       stopped = true;
       if (timer) clearInterval(timer);
     };
-  }, [match?.id, match?.status, match?.datetime_utc, match?.team_home, match?.team_away]);
+  }, [match?.id, match?.status, match?.league, match?.datetime_utc, match?.team_home, match?.team_away, match?.match_uid]);
 
   const matchIdRef = useRef<number | undefined>(undefined);
   useEffect(() => { if (match) matchIdRef.current = match.id; }, [match]);
@@ -376,12 +382,12 @@ export default function MatchPage() {
             )}
           </span>
         </h1>
-        {(match.status === "live" || match.status === "finished") && match.home_score != null && match.away_score != null && (
+        {(match.status === "live" || match.status === "break" || match.status === "finished") && match.home_score != null && match.away_score != null && (
           <div className="flex items-center gap-3 mb-2">
             <span className="text-2xl sm:text-3xl font-black tabular-nums">
               {match.home_score} : {match.away_score}
             </span>
-            {match.current_period && match.status === "live" && (
+            {match.current_period && (match.status === "live" || match.status === "break") && (
               <span className="text-xs font-bold text-hockey-live uppercase">{match.current_period}</span>
             )}
           </div>
@@ -390,7 +396,7 @@ export default function MatchPage() {
           {parseMatchDate(match.datetime_utc).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}
         </p>
 
-        {match.status === "finished" && match.league === "KHL" ? (
+        {match.status === "finished" && (match.league === "KHL" || match.league === "NHL") && (
           <div className="mt-2">
             {statsLoading && (
               <div className="glass rounded-2xl p-6 space-y-3 animate-pulse" aria-hidden>
@@ -406,7 +412,9 @@ export default function MatchPage() {
             )}
             {stats && <MatchStats data={stats} tabs />}
           </div>
-        ) : (
+        )}
+        {/* у НХЛ finished запись с плеером остаётся под статистикой */}
+        {!(match.status === "finished" && match.league === "KHL") && (
           <>
             {sortedStreams.length > 0 && (
               <div className="flex flex-nowrap gap-2 mb-3 sm:mb-4 overflow-x-auto pb-1 scrollbar-hide">
@@ -488,7 +496,7 @@ export default function MatchPage() {
           </div>
         )}
 
-        {match.league === "KHL" && match.status === "live" && (
+        {(match.league === "KHL" || match.league === "NHL") && (match.status === "live" || match.status === "break") && (
           <div className="mt-6">
             {statsLoading && !stats && (
               <div className="glass rounded-2xl p-6 space-y-3 animate-pulse" aria-hidden>

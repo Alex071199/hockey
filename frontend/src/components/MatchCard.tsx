@@ -32,8 +32,8 @@ export default function MatchCard({ match, featured = false, score = null, finis
   const { showScores } = useScoreToggle();
   const { isFavorite } = useFavorites();
 
-  const favHome = match.status === "live" && isFavorite(match.team_home);
-  const favAway = match.status === "live" && isFavorite(match.team_away);
+  const favHome = (match.status === "live" || match.status === "break") && isFavorite(match.team_home);
+  const favAway = (match.status === "live" || match.status === "break") && isFavorite(match.team_away);
   const favoriteLive = favHome || favAway;
 
   useEffect(() => {
@@ -90,10 +90,12 @@ export default function MatchCard({ match, featured = false, score = null, finis
               )}
             </div>
             <div className="flex items-center gap-2">
-              {match.status === "live" ? (
+              {match.status === "live" || match.status === "break" ? (
                 <div className="flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-hockey-live animate-pulse-live" />
-                  <span className="text-[10px] sm:text-[11px] font-bold text-hockey-live tracking-wider">LIVE</span>
+                  <span className="text-[10px] sm:text-[11px] font-bold text-hockey-live tracking-wider">
+                    {match.status === "break" ? "ПЕРЕРЫВ" : "LIVE"}
+                  </span>
                 </div>
               ) : match.status === "pre_game" ? (
                 <span className="text-[10px] sm:text-[11px] font-medium text-hockey-text-muted tabular-nums">{countdown}</span>
@@ -125,7 +127,8 @@ export default function MatchCard({ match, featured = false, score = null, finis
                       <span className="text-[9px] sm:text-[10px] font-bold text-hockey-text-muted mt-0.5">Б</span>
                     )}
                   </span>
-                ) : match.status === "live" && match.home_score != null && match.away_score != null ? (
+                ) : (match.status === "live" || match.status === "break") &&
+                  match.home_score != null && match.away_score != null ? (
                   <span className="flex flex-col items-center leading-none">
                     <span className="text-base sm:text-xl font-black tabular-nums whitespace-nowrap">{match.home_score} : {match.away_score}</span>
                     {match.current_period && (
@@ -165,7 +168,11 @@ export default function MatchCard({ match, featured = false, score = null, finis
                   ? "bg-hockey-accent text-white"
                   : "bg-white/5 text-hockey-text-secondary group-hover:bg-hockey-accent group-hover:text-white"
               }`}>
-                {match.status === "live" ? "Смотреть" : match.status === "finished" ? "Смотреть статистику" : "Посмотреть запись"}
+                {match.status === "live" || match.status === "break"
+                  ? "Смотреть"
+                  : match.status === "finished"
+                    ? "Смотреть статистику"
+                    : "Посмотреть запись"}
               </span>
             )}
           </div>

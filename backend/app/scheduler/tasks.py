@@ -317,8 +317,12 @@ def _pair_key(home: str | None, away: str | None) -> tuple[str, str]:
 
 
 def _win_id_of(row: Match) -> int:
+    """WIN-id строки 1win; у строк официального API (NHL_) id — не её."""
+    uid = row.match_uid or ""
+    if not uid.startswith("WIN_"):
+        return -1
     try:
-        return int((row.match_uid or "").split("_", 1)[1])
+        return int(uid.split("_", 1)[1])
     except (ValueError, IndexError):
         return -1
 
@@ -486,12 +490,28 @@ async def sync_win_nhl() -> None:
                 # обновляем старую строку, а не создаём вторую (будет дубль)
                 twin = _find_nhl_twin(pair_index.get(_pair_key(home, away), []), dt)
                 if twin is not None:
-                    logger.info(
-                        "NHL: %s - %s перевыпущен в линии: %s -> %s, сливаем",
-                        twin.team_home, twin.team_away, twin.match_uid, uid,
-                    )
-                    twin.match_uid = uid
-                    existing = twin
+                    if (twin.match_uid or "").startswith("NHL_"):
+                        # строку ведёт официальный API: uid не переименовываем,
+                        # 1win дописывает в неё только стрим
+                        logger.info(
+                            "NHL: %s - %s уже в расписании от API (%s), "
+                            "1win дописывает стрим",
+                            twin.team_home, twin.team_away, twin.match_uid,
+                        )
+                        existing = twin
+                    else:
+                        logger.info(
+                            "NHL: %s - %s перевыпущен в линии: %s -> %s, сливаем",
+                            twin.team_home, twin.team_away, twin.match_uid, uid,
+                        )
+                        twin.match_uid = uid
+                        existing = twin
+
+            # у строки API авторитетны её uid/счёт/статус — сюда дописываем
+            # только трансляцию из 1win
+            api_row = existing is not None and (
+                existing.match_uid or ""
+            ).startswith("NHL_")
 
             home_score = snap.get("home_score")
             away_score = snap.get("away_score")
@@ -538,10 +558,10 @@ async def sync_win_nhl() -> None:
                 continue
 
             dirty = False
-            if existing.status != status:
+            if not api_row and existing.status != status:
                 existing.status = status
                 dirty = True
-            if dt and existing.datetime_utc != dt:
+            if not api_row and dt and existing.datetime_utc != dt:
                 existing.datetime_utc = dt
                 dirty = True
             if stream and existing.stream_urls != stream:
@@ -554,13 +574,13 @@ async def sync_win_nhl() -> None:
                     for s in existing.stream_urls
                 ]
                 dirty = True
-            if home_score is not None and existing.home_score != home_score:
+            if not api_row and home_score is not None and existing.home_score != home_score:
                 existing.home_score = home_score
                 dirty = True
-            if away_score is not None and existing.away_score != away_score:
+            if not api_row and away_score is not None and existing.away_score != away_score:
                 existing.away_score = away_score
                 dirty = True
-            if period and existing.current_period != period:
+            if not api_row and period and existing.current_period != period:
                 existing.current_period = period
                 dirty = True
             if dirty:
@@ -582,8 +602,9 @@ async def _merge_nhl_duplicates(
     """Сливает накопившиеся дубли строк НХЛ одной игры.
 
     Одна игра могла быть в линии под разными WIN-id (переиздание карточки):
-    на один id пришла строка со стримом, на другой — без. Канон — строка из
-    текущей линии (она продолжает получать обновления), её и оставляем.
+    на один id пришла строка со стримом, на другой — без. Канон — строка
+    официального API (NHL_), иначе строка из текущей линии (она продолжает
+    получать обновления), её и оставляем.
     """
     rows = (
         (await db.execute(select(Match).where(Match.league == "NHL")))
@@ -620,6 +641,9 @@ async def _merge_nhl_cluster(
 
     def rank(r: Match) -> tuple:
         return (
+            # официальный API главнее строки из линии — счёт/статус в ней
+            # авторитетны, стримы с дубля всё равно сольются выше
+            (r.match_uid or "").startswith("NHL_"),
             _win_id_of(r) in line_ids,
             bool(r.stream_urls),
             r.updated_at or datetime.min,
@@ -1526,6 +1550,199 @@ async def warm_khl_calendar() -> None:
         logger.info("KHL calendar: background build started")
 
 
+async def sync_nhl_schedule() -> None:
+    """Расписание НХЛ из официального API: игра найдена — сохранена в БД.
+
+    Окно -1..+7 дней по UTC: score фильтрует игры по местной дате игры,
+    поэтому вчерашний день ловит игры, стартующие сегодня после полуночи UTC.
+    Строки с uid NHL_<game id>; существующая строка той же пары (1win)
+    переименовывается, а не дублируется — её стримы сохраняются.
+    Счёт/период/статус строки пишет update_nhl_scores (каждые 30 секунд).
+    """
+    try:
+        from app import nhl_api
+    except Exception as e:
+        logger.warning("NHL API import failed: %s", e)
+        return
+    try:
+        games = await nhl_api.get_games_window(
+            days_back=1, days_fwd=7, max_age=nhl_api.SCORE_TTL
+        )
+    except Exception as e:
+        logger.warning("NHL schedule fetch failed: %s", e)
+        return
+    if not games:
+        return
+
+    changed_ids: list[int] = []
+    async with async_session() as db:
+        rows = (
+            (await db.execute(select(Match).where(Match.league == "NHL")))
+            .scalars()
+            .all()
+        )
+        by_uid: dict[str, Match] = {r.match_uid: r for r in rows if r.match_uid}
+        pair_index: dict[tuple[str, str], list[Match]] = {}
+        for r in rows:
+            pair_index.setdefault(_pair_key(r.team_home, r.team_away), []).append(r)
+
+        for g in games.values():
+            try:
+                gid = int(g["id"])
+            except (TypeError, ValueError):
+                continue
+            uid = f"NHL_{gid}"
+            home = nhl_api.team_ru(g.get("homeTeam"))
+            away = nhl_api.team_ru(g.get("awayTeam"))
+            if not home or not away:
+                continue
+            dt = nhl_api.game_datetime(g)
+            status = nhl_api.game_status(g)
+            score_h, score_a = nhl_api.game_scores(g)
+            period = nhl_api.period_label(g)
+
+            existing = by_uid.get(uid)
+            if existing is None:
+                twin = _find_nhl_twin(
+                    pair_index.get(_pair_key(home, away), []), dt
+                )
+                if twin is not None:
+                    logger.info(
+                        "NHL: %s - %s найден в API: %s -> %s, переименовываем",
+                        twin.team_home, twin.team_away, twin.match_uid, uid,
+                    )
+                    by_uid.pop(twin.match_uid, None)
+                    twin.match_uid = uid
+                    existing = twin
+                    by_uid[uid] = twin
+
+            if existing is None:
+                new_match = Match(
+                    match_uid=uid,
+                    league="NHL",
+                    team_home=home,
+                    team_away=away,
+                    datetime_utc=dt,
+                    status=status or "pre_game",
+                    added_live=(status == "live"),
+                    home_score=score_h,
+                    away_score=score_a,
+                    current_period=period,
+                )
+                db.add(new_match)
+                await db.flush()
+                by_uid[uid] = new_match
+                pair_index.setdefault(_pair_key(home, away), []).append(new_match)
+                changed_ids.append(new_match.id)
+                logger.info("NHL: added %s - %s [%s]", home, away, status)
+                continue
+
+            dirty = False
+            if dt and existing.datetime_utc != dt:
+                existing.datetime_utc = dt
+                dirty = True
+            if status and existing.status != status:
+                existing.status = status
+                dirty = True
+            if score_h is not None and existing.home_score != score_h:
+                existing.home_score = score_h
+                dirty = True
+            if score_a is not None and existing.away_score != score_a:
+                existing.away_score = score_a
+                dirty = True
+            if period and existing.current_period != period:
+                existing.current_period = period
+                dirty = True
+            if dirty:
+                changed_ids.append(existing.id)
+
+        await db.commit()
+
+    if changed_ids:
+        await _broadcast_matches(changed_ids)
+        logger.info("NHL schedule: updated %d matches", len(changed_ids))
+
+
+async def update_nhl_scores() -> None:
+    """Счёт/период/перерыв НХЛ из официального API (каждые 30 секунд).
+
+    Как update_khl_scores: LIVE+clock.inIntermission -> break/«Перерыв»,
+    OFF/FINAL -> finished/«Завершён»; строки WIN_ (ещё не переименованные
+    в NHL_) матчатся по паре команд +-6 часов.
+    """
+    try:
+        from app import nhl_api
+    except Exception as e:
+        logger.warning("NHL API import failed: %s", e)
+        return
+    games = await nhl_api.get_games_window(
+        days_back=1, days_fwd=1, max_age=nhl_api.SCORE_LIVE_TTL
+    )
+    if not games:
+        logger.info("NHL update: no games found")
+        return
+
+    changed_ids: list[int] = []
+    now = datetime.now(timezone.utc)
+    async with async_session() as db:
+        rows = (
+            (await db.execute(
+                select(Match).where(
+                    Match.league == "NHL",
+                    Match.status.in_(["live", "break", "pre_game", "finished"]),
+                    Match.datetime_utc >= now - timedelta(days=2),
+                )
+            ))
+            .scalars()
+            .all()
+        )
+        for m in rows:
+            g = None
+            uid = m.match_uid or ""
+            if uid.startswith("NHL_"):
+                try:
+                    g = games.get(int(uid.split("_", 1)[1]))
+                except ValueError:
+                    g = None
+            if g is None:
+                g = nhl_api.find_game_by_pair(
+                    games.values(), m.team_home, m.team_away, m.datetime_utc
+                )
+            if g is None:
+                continue
+            status = nhl_api.game_status(g)
+            score_h, score_a = nhl_api.game_scores(g)
+            period = nhl_api.period_label(g)
+            dirty = False
+            if status and m.status != status:
+                m.status = status
+                dirty = True
+            if score_h is not None and m.home_score != score_h:
+                m.home_score = score_h
+                dirty = True
+            if score_a is not None and m.away_score != score_a:
+                m.away_score = score_a
+                dirty = True
+            if period and m.current_period != period:
+                m.current_period = period
+                dirty = True
+            if dirty:
+                changed_ids.append(m.id)
+        if changed_ids:
+            await db.commit()
+
+    if changed_ids:
+        unique_ids = list(set(changed_ids))
+        async with async_session() as db:
+            result = await db.execute(select(Match).where(Match.id.in_(unique_ids)))
+            updated = result.scalars().all()
+        await manager.broadcast({
+            "type": "matches_update",
+            "data": [_match_to_dict(m) for m in updated],
+        })
+        logger.info("Updated NHL scores for %d matches", len(unique_ids))
+
+
 def setup_scheduler() -> None:
     scheduler.add_job(
         scrape_and_update,
@@ -1595,6 +1812,24 @@ def setup_scheduler() -> None:
         replace_existing=True,
         max_instances=1,
         next_run_time=datetime.now() + timedelta(seconds=15),
+    )
+    scheduler.add_job(
+        sync_nhl_schedule,
+        "interval",
+        minutes=5,
+        id="sync_nhl_schedule",
+        replace_existing=True,
+        max_instances=1,
+        next_run_time=datetime.now() + timedelta(seconds=25),
+    )
+    scheduler.add_job(
+        update_nhl_scores,
+        "interval",
+        seconds=settings.SCORE_UPDATE_INTERVAL_SECONDS,
+        id="update_nhl_scores",
+        replace_existing=True,
+        max_instances=1,
+        next_run_time=datetime.now() + timedelta(seconds=40),
     )
     scheduler.add_job(
         sync_win_extra,
