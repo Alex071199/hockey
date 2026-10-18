@@ -81,6 +81,108 @@ object ApiClient {
         }
     }
 
+    suspend fun fetchKhlCalendar(server: String): KhlCalendarResponse? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                http.newCall(
+                    Request.Builder().url("$server/api/khl/calendar").build()
+                ).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        resp.body?.string()?.let {
+                            JsonFormat.json.decodeFromString(KhlCalendarResponse.serializer(), it)
+                        }
+                    } else null
+                }
+            }.getOrNull()
+        }
+
+    suspend fun fetchScheduleDate(
+        server: String,
+        date: String,
+        tzOffsetMinutes: Int,
+    ): List<Match> = withContext(Dispatchers.IO) {
+        runCatching {
+            val u = "$server/api/schedule?date=$date&tz_offset=$tzOffsetMinutes"
+            http.newCall(Request.Builder().url(u).build()).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    resp.body?.string()?.let {
+                        JsonFormat.json.decodeFromString(listAdapter, it)
+                    } ?: emptyList()
+                } else emptyList()
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    suspend fun fetchStandings(server: String): StandingsResponse? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                http.newCall(
+                    Request.Builder().url("$server/api/standings?league=KHL").build()
+                ).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        resp.body?.string()?.let {
+                            JsonFormat.json.decodeFromString(StandingsResponse.serializer(), it)
+                        }
+                    } else null
+                }
+            }.getOrNull()
+        }
+
+    /**
+     * Календарь на ближайшие `days` дней (сегодня + остальные) по локальной
+     * дате устройства: КХЛ — официальный полный календарь сезона,
+     * НХЛ — посуточные запросы к /api/schedule (сервер режет по tz_offset).
+     */
+    suspend fun fetchCalendarMatches(server: String, days: Int = 7): List<Match> {
+        val zone = java.time.ZoneId.systemDefault()
+        val today = java.time.LocalDate.now(zone)
+        val windowStart = today.atStartOfDay(zone).toInstant()
+        val windowEnd = today.plusDays(days.toLong()).atStartOfDay(zone).toInstant()
+        val tzOffsetMin = java.util.TimeZone.getDefault().rawOffset / 60_000
+
+        val out = mutableListOf<Match>()
+
+        fetchKhlCalendar(server)?.let { cal ->
+            for (e in cal.matches) {
+                val inst = runCatching { java.time.Instant.parse(e.startUtc) }.getOrNull() ?: continue
+                if (inst < windowStart || inst >= windowEnd) continue
+                out.add(
+                    Match(
+                        id = (e.id ?: 0L).toInt(),
+                        matchUid = "KHL_${e.id}",
+                        league = "KHL",
+                        teamHome = e.home,
+                        teamAway = e.away,
+                        datetimeUtc = e.startUtc,
+                        status = when (e.status) {
+                            "finished" -> "finished"
+                            "in_progress" -> "live"
+                            else -> "planned"
+                        },
+                        homeScore = e.scoreHome,
+                        awayScore = e.scoreAway,
+                    ),
+                )
+            }
+        }
+
+        for (i in 0 until days) {
+            val d = today.plusDays(i.toLong()).toString()
+            out += fetchScheduleDate(server, d, tzOffsetMin)
+                .filter { it.league.equals("NHL", true) }
+        }
+
+        return out
+            .distinctBy {
+                it.matchUid ?: "${it.league}_${it.datetimeUtc}_${it.teamHome}_${it.teamAway}"
+            }
+            .filter { m ->
+                val inst = runCatching { java.time.Instant.parse(m.datetimeUtc) }.getOrNull()
+                inst != null && inst >= windowStart && inst < windowEnd
+            }
+            .sortedBy { it.datetimeUtc }
+    }
+
     /** Активация по одноразовому 6-значному коду. true — ок; false — код не годится. */
     suspend fun activateCode(server: String, code: String, deviceId: String): Boolean =
         withContext(Dispatchers.IO) {

@@ -1,6 +1,6 @@
 {
-  "version": "1.11",
-  "version_code": 12,
-  "apk_url": "https://github.com/Alex071199/hockey/releases/download/v12/HockeyLiveTV.apk",
-  "notes": "Авторизация не сбрасывается после обновлений; ник бота на экране активации"
+  "version": "1.12",
+  "version_code": 13,
+  "apk_url": "https://hockey-live-production-b0cc.up.railway.app/api/app/apk",
+  "notes": "Календарь матчей КХЛ и НХЛ на 7 дней, турнирная таблица КХЛ, обзоры матчей НХЛ"
 }

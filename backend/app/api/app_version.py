@@ -1,10 +1,25 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pathlib import Path
 import json
 
 router = APIRouter(prefix="/api/app", tags=["app"])
 
 RELEASE_FILE = Path(__file__).resolve().parents[2] / "latest_release.json"
+APK_FILE = Path(__file__).resolve().parents[2] / "static" / "HockeyLiveTV.apk"
+
+
+@router.get("/apk")
+async def app_apk():
+    """Отдаёт APK Android TV приложения для обновления по воздуху."""
+    if not APK_FILE.exists():
+        raise HTTPException(status_code=404, detail="apk not found")
+    return FileResponse(
+        APK_FILE,
+        media_type="application/vnd.android.package-archive",
+        filename="HockeyLiveTV.apk",
+    )
+
 
 
 @router.get("/version")

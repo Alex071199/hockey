@@ -78,6 +78,12 @@ data class StatsRosters(
 )
 
 @Serializable
+data class HighlightItem(
+    val title: String? = null,
+    @SerialName("embed_url") val embedUrl: String = "",
+)
+
+@Serializable
 data class MatchStatsResponse(
     val match: StatsMatchInfo? = null,
     val periods: StatsPeriods? = null,
@@ -85,4 +91,5 @@ data class MatchStatsResponse(
     val goals: List<StatGoal> = emptyList(),
     val penalties: List<StatPenalty> = emptyList(),
     val rosters: StatsRosters? = null,
+    val highlights: List<HighlightItem> = emptyList(),
 )

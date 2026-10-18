@@ -33,7 +33,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
@@ -106,6 +108,7 @@ class MainActivity : ComponentActivity() {
             var pendingMatch by remember { mutableStateOf<Match?>(null) }
             var updateInfo by remember { mutableStateOf<AppVersionInfo?>(null) }
             var updateStatus by remember { mutableStateOf<String?>(null) }
+            val scope = rememberCoroutineScope()
 
             LaunchedEffect(Unit) {
                 while (true) {
@@ -136,8 +139,39 @@ class MainActivity : ComponentActivity() {
                 onMatchClick = { match ->
                     when {
                         match.playableSources.size > 1 -> pendingMatch = match
-                        match.playableSources.size == 1 -> launchPlayer(context, match, match.playableSources.first())
-                        else -> Toast.makeText(context, "Нет доступных источников", Toast.LENGTH_SHORT).show()
+                        match.playableSources.size == 1 ->
+                            launchPlayer(context, match, match.playableSources.first())
+                        match.league.equals("NHL", true) && match.status == "finished" -> {
+                            val m = match
+                            scope.launch {
+                                val stats = runCatching {
+                                    ApiClient.fetchMatchStats(
+                                        AppSettings.serverUrl(context),
+                                        m.teamHome,
+                                        m.teamAway,
+                                        m.datetimeUtc.take(10),
+                                        live = false,
+                                    )
+                                }.getOrNull()
+                                val hl = stats?.highlights?.firstOrNull()?.embedUrl
+                                if (!hl.isNullOrBlank()) {
+                                    context.startActivity(
+                                        Intent(context, HighlightActivity::class.java)
+                                            .putExtra(HighlightActivity.EXTRA_URL, hl),
+                                    )
+                                } else {
+                                    Toast.makeText(context, "Обзор пока недоступен", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                        match.status == "finished" ->
+                            Toast.makeText(context, "Нет доступных источников", Toast.LENGTH_SHORT).show()
+                        else ->
+                            Toast.makeText(
+                                context,
+                                "Трансляция появится на главном экране в день матча",
+                                Toast.LENGTH_SHORT,
+                            ).show()
                     }
                 },
             )
@@ -586,6 +620,32 @@ fun HomeScreen(
     loading: Boolean,
     onMatchClick: (Match) -> Unit,
 ) {
+    val context = LocalContext.current
+    var screen by remember { mutableStateOf("home") }
+    var calendarMatches by remember { mutableStateOf<List<Match>>(emptyList()) }
+    var calendarLoading by remember { mutableStateOf(true) }
+    var standings by remember { mutableStateOf<StandingsResponse?>(null) }
+    var standingsError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(screen) {
+        when (screen) {
+            "calendar" -> {
+                calendarLoading = true
+                calendarMatches = runCatching {
+                    ApiClient.fetchCalendarMatches(AppSettings.serverUrl(context))
+                }.getOrDefault(emptyList())
+                calendarLoading = false
+            }
+            "table" -> {
+                standingsError = null
+                standings = runCatching {
+                    ApiClient.fetchStandings(AppSettings.serverUrl(context))
+                }.getOrNull()
+                if (standings == null) standingsError = "Ошибка загрузки таблицы"
+            }
+        }
+    }
+
     val khl = matches.filter { it.league.equals("KHL", true) }
     val nhl = matches.filter { it.league.equals("NHL", true) }
     val vhl = matches.filter { it.league.equals("VHL", true) }
@@ -595,7 +655,13 @@ fun HomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Theme.bg)
-            .padding(vertical = 24.dp),
+            .padding(vertical = 24.dp)
+            .onPreviewKeyEvent { e ->
+                if (e.type == KeyEventType.KeyDown && e.key == Key.Back && screen != "home") {
+                    screen = "home"
+                    true
+                } else false
+            },
     ) {
         Row(
             modifier = Modifier
@@ -620,35 +686,400 @@ fun HomeScreen(
                 text = when {
                     loading -> "Загрузка…"
                     error != null -> error
+                    screen == "calendar" -> "Календарь: КХЛ и НХЛ на 7 дней"
+                    screen == "table" -> "Турнирная таблица КХЛ"
                     else -> "KHL · NHL · VHL · MHL"
                 },
                 color = Theme.textSecondary,
                 fontSize = 14.sp,
             )
+            Spacer(Modifier.weight(1f))
+            HeaderButton("Календарь", selected = screen == "calendar") { screen = "calendar" }
+            Spacer(Modifier.width(10.dp))
+            HeaderButton("Таблица", selected = screen == "table") { screen = "table" }
+            if (screen != "home") {
+                Spacer(Modifier.width(10.dp))
+                HeaderButton("◀ Главная", selected = false) { screen = "home" }
+            }
         }
 
         Spacer(Modifier.height(20.dp))
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
+        when (screen) {
+            "calendar" -> CalendarSection(
+                matches = calendarMatches,
+                loading = calendarLoading,
+                onMatchClick = onMatchClick,
+            )
+            "table" -> StandingsSection(
+                data = standings,
+                error = standingsError,
+                loading = standings == null && standingsError == null,
+            )
+            else -> LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                if (khl.isNotEmpty()) item { LeagueRow("КХЛ", "KHL", khl, onMatchClick) }
+                if (nhl.isNotEmpty()) item { LeagueRow("НХЛ", "NHL", nhl, onMatchClick) }
+                if (vhl.isNotEmpty()) item { LeagueRow("ВХЛ", "VHL", vhl, onMatchClick) }
+                if (mhl.isNotEmpty()) item { LeagueRow("МХЛ", "MHL", mhl, onMatchClick) }
+                if (!loading && error == null && matches.isEmpty()) {
+                    item {
+                        Text(
+                            text = "Нет активных трансляций",
+                            color = Theme.textSecondary,
+                            fontSize = 16.sp,
+                            modifier = Modifier.padding(horizontal = 32.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun HeaderButton(label: String, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = if (selected) Theme.accent else Theme.card,
+            focusedContainerColor = Theme.accentHover,
+        ),
+    ) {
+        Text(
+            text = "  $label  ",
+            color = Color.White,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(vertical = 6.dp),
+        )
+    }
+}
+
+@Composable
+fun CalendarSection(
+    matches: List<Match>,
+    loading: Boolean,
+    onMatchClick: (Match) -> Unit,
+) {
+    if (loading) {
+        Text(
+            text = "Загрузка календаря…",
+            color = Theme.textSecondary,
+            fontSize = 16.sp,
+            modifier = Modifier.padding(horizontal = 32.dp),
+        )
+        return
+    }
+
+    val zone = java.time.ZoneId.systemDefault()
+    val today = java.time.LocalDate.now(zone)
+    val filtered = matches.mapNotNull { m ->
+        val inst = runCatching { java.time.Instant.parse(m.datetimeUtc) }.getOrNull()
+            ?: return@mapNotNull null
+        val d = inst.atZone(zone).toLocalDate()
+        if (d < today || d >= today.plusDays(7)) null else d to m
+    }.sortedBy { it.second.datetimeUtc }
+
+    if (filtered.isEmpty()) {
+        Text(
+            text = "Нет матчей КХЛ и НХЛ на ближайшие 7 дней",
+            color = Theme.textSecondary,
+            fontSize = 16.sp,
+            modifier = Modifier.padding(horizontal = 32.dp),
+        )
+        return
+    }
+
+    val grouped = LinkedHashMap<java.time.LocalDate, MutableList<Match>>()
+    for ((d, m) in filtered) grouped.getOrPut(d) { mutableListOf() }.add(m)
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        for ((date, list) in grouped) {
+            item(key = "day_$date") { CalendarDayHeader(date, today) }
+            items(list, key = { "${it.league}|${it.matchUid ?: it.id}|${it.datetimeUtc}" }) { m ->
+                CalendarRow(match = m, onClick = { onMatchClick(m) })
+            }
+        }
+    }
+}
+
+@Composable
+fun CalendarDayHeader(date: java.time.LocalDate, today: java.time.LocalDate) {
+    val months = listOf(
+        "января", "февраля", "марта", "апреля", "мая", "июня",
+        "июля", "августа", "сентября", "октября", "ноября", "декабря",
+    )
+    val weekdays = listOf(
+        "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье",
+    )
+    val md = "${date.dayOfMonth} ${months[date.monthValue - 1]}"
+    val title = when (date) {
+        today -> "Сегодня, $md"
+        today.plusDays(1) -> "Завтра, $md"
+        else -> "${weekdays[date.dayOfWeek.value - 1]}, $md"
+    }
+    Text(
+        text = title,
+        color = Theme.accent,
+        fontSize = 18.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp),
+    )
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun CalendarRow(match: Match, onClick: () -> Unit) {
+    val time = runCatching {
+        java.time.Instant.parse(match.datetimeUtc)
+            .atZone(java.time.ZoneId.systemDefault())
+            .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+    }.getOrDefault("")
+
+    Surface(
+        onClick = onClick,
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = Theme.card,
+            focusedContainerColor = Theme.cardHover,
+        ),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (khl.isNotEmpty()) item { LeagueRow("КХЛ", "KHL", khl, onMatchClick) }
-            if (nhl.isNotEmpty()) item { LeagueRow("НХЛ", "NHL", nhl, onMatchClick) }
-            if (vhl.isNotEmpty()) item { LeagueRow("ВХЛ", "VHL", vhl, onMatchClick) }
-            if (mhl.isNotEmpty()) item { LeagueRow("МХЛ", "MHL", mhl, onMatchClick) }
-            if (!loading && error == null && matches.isEmpty()) {
-                item {
+            Text(
+                text = time,
+                color = Theme.text,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.width(52.dp),
+            )
+            LeagueLogo(match.league, height = 22.dp)
+            Spacer(Modifier.width(12.dp))
+            TeamLogo(match.teamHome, size = 34.dp)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = match.teamHome,
+                color = Theme.text,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(12.dp))
+            CalendarCenter(match)
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = match.teamAway,
+                color = Theme.text,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                textAlign = TextAlign.End,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(10.dp))
+            TeamLogo(match.teamAway, size = 34.dp)
+        }
+    }
+}
+
+@Composable
+fun CalendarCenter(match: Match) {
+    when {
+        match.isLive -> Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(text = "●", color = Theme.live, fontSize = 10.sp)
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = "LIVE",
+                color = Theme.live,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            if (match.displayScore.isNotEmpty()) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = match.displayScore,
+                    color = Theme.text,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+        match.status == "finished" && match.displayScore.isNotEmpty() -> Text(
+            text = match.displayScore,
+            color = Theme.textSecondary,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        else -> Text(text = "vs", color = Theme.textMuted, fontSize = 14.sp)
+    }
+}
+
+private val khlTableCols = listOf(44.dp, 44.dp, 48.dp, 48.dp, 44.dp, 80.dp, 52.dp)
+
+@Composable
+fun StandingsSection(
+    data: StandingsResponse?,
+    error: String?,
+    loading: Boolean,
+) {
+    when {
+        error != null -> Text(
+            text = error,
+            color = Theme.textSecondary,
+            fontSize = 16.sp,
+            modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
+        )
+        loading || data == null -> Text(
+            text = "Загрузка таблицы…",
+            color = Theme.textSecondary,
+            fontSize = 16.sp,
+            modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
+        )
+        else -> {
+            val confNames = mapOf(
+                "Western Conference" to "Западная конференция",
+                "Eastern Conference" to "Восточная конференция",
+            )
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 8.dp),
+            ) {
+                item(key = "title") {
                     Text(
-                        text = "Нет активных трансляций",
-                        color = Theme.textSecondary,
-                        fontSize = 16.sp,
-                        modifier = Modifier.padding(horizontal = 32.dp),
+                        text = "Турнирная таблица КХЛ",
+                        color = Theme.text,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp),
+                    )
+                }
+                for (g in data.groups) {
+                    item(key = "g_${g.name}") {
+                        Text(
+                            text = confNames[g.name] ?: g.name,
+                            color = Theme.accent,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 32.dp, vertical = 10.dp),
+                        )
+                    }
+                    item(key = "h_${g.name}") { StandingsHeaderRow() }
+                    items(g.rows, key = { "r_${g.name}_${it.position}" }) { row ->
+                        StandingsRowView(row)
+                    }
+                }
+                item(key = "foot") {
+                    Text(
+                        text = "Данные официального API КХЛ · сезон ${data.season}",
+                        color = Theme.textMuted,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 32.dp, vertical = 16.dp),
                     )
                 }
             }
         }
+    }
+}
+
+@Composable
+fun StandingsHeaderRow() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 32.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "#",
+            color = Theme.textMuted,
+            fontSize = 12.sp,
+            modifier = Modifier.width(34.dp),
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.width(34.dp))
+        Text(
+            text = "КОМАНДА",
+            color = Theme.textMuted,
+            fontSize = 12.sp,
+            modifier = Modifier.weight(1f),
+        )
+        val labels = listOf("И", "В", "ВО", "ПО", "П", "Ш", "О")
+        labels.forEachIndexed { i, l ->
+            Text(
+                text = l,
+                color = Theme.textMuted,
+                fontSize = 12.sp,
+                modifier = Modifier.width(khlTableCols[i]),
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+@Composable
+fun StandingsRowView(row: StandingsRow) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 32.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "${row.position}",
+            color = Theme.textSecondary,
+            fontSize = 14.sp,
+            modifier = Modifier.width(34.dp),
+            textAlign = TextAlign.Center,
+        )
+        TeamLogo(row.teamName, size = 26.dp)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = row.teamName,
+            color = Theme.text,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            modifier = Modifier.weight(1f),
+        )
+        val values = listOf(
+            "${row.played}",
+            "${row.wins}",
+            "${row.otWins}",
+            "${row.otLosses}",
+            "${row.losses}",
+            "${row.goalsFor}:${row.goalsAgainst}",
+        )
+        values.forEachIndexed { i, v ->
+            Text(
+                text = v,
+                color = Theme.textSecondary,
+                fontSize = 13.sp,
+                modifier = Modifier.width(khlTableCols[i]),
+                textAlign = TextAlign.Center,
+            )
+        }
+        Text(
+            text = "${row.points}",
+            color = Theme.accent,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.width(khlTableCols[6]),
+            textAlign = TextAlign.Center,
+        )
     }
 }
 

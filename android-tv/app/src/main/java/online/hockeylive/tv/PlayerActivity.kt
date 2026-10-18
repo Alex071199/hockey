@@ -524,6 +524,38 @@ class PlayerActivity : ComponentActivity() {
             )
         }
 
+        // Обзор матча (НХЛ — ролики Brightcove, как на сайте)
+        val hlItems = s.highlights.filter { it.embedUrl.isNotBlank() }
+        if (hlItems.isNotEmpty()) {
+            sectionTitle("Обзор матча")
+            for (h in hlItems) {
+                val label = h.title?.takeIf { t -> t.isNotBlank() } ?: "Смотреть обзор"
+                c.addView(
+                    TextView(this).apply {
+                        text = "▶  $label"
+                        setTextColor(0xFFFFFFFF.toInt())
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                        typeface = Typeface.DEFAULT_BOLD
+                        gravity = Gravity.CENTER_VERTICAL
+                        isFocusable = true
+                        isClickable = true
+                        setPadding(dp(18), dp(14), dp(18), dp(14))
+                        setBackgroundColor(0xFFE11D48.toInt())
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                        ).apply { topMargin = dp(8) }
+                        setOnClickListener {
+                            startActivity(
+                                Intent(this@PlayerActivity, HighlightActivity::class.java)
+                                    .putExtra(HighlightActivity.EXTRA_URL, h.embedUrl),
+                            )
+                        }
+                    },
+                )
+            }
+        }
+
         val homeId = info?.homeTeamId ?: 0
         val serverBase = AppSettings.serverUrl(this).trimEnd('/')
         if (s.goals.isNotEmpty()) {
