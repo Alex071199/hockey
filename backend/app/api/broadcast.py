@@ -39,6 +39,12 @@ HOCKEY_SPORT_ID = 35
 # подпись m3u8 живёт несколько минут — обновляемся чаще, чтобы не упираться в 400
 STATE_TTL = 120
 LIVE_TTL = 60            # кэш списка live-матчей
+# Подпись в URL живёт несколько минут, а плеер переиспользует ссылку на
+# медиа-плейлист вечно: свежие параметры в неё не приходят. Если возраст
+# timestamp больше SIGN_TTL — подменяем подпись на свежую до запроса,
+# иначе origin отдаёт заглушку placeholders/timeout.ts (~173 кбит/с —
+# зритель видит «мыло», а старый фоллбэк не срабатывает: заглушка = 200)
+SIGN_TTL = 120
 
 _SSL = ssl.create_default_context()
 _state: dict[int, tuple[float, dict]] = {}
@@ -227,6 +233,20 @@ def _rekey(url: str, fresh_m3u8: str) -> str:
     return urllib.parse.urlunparse(parsed._replace(query=query))
 
 
+def _sign_age(url: str) -> float:
+    """Возраст подписи (сек) по параметру timestamp; 0, если его нет."""
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+    try:
+        return time.time() - int((q.get("timestamp") or [""])[0])
+    except ValueError:
+        return 0.0
+
+
+def _is_placeholder(content: bytes) -> bool:
+    """Ответ-заглушка origin'а вместо настоящего потока."""
+    return b"placeholders/" in content
+
+
 def _absolutize(ref: str, base_url: str) -> str:
     return urllib.parse.urljoin(base_url, ref)
 
@@ -269,7 +289,7 @@ def _is_manifest(url: str) -> bool:
 
 async def _fetch_manifest(win_id: int, st: dict) -> tuple[bytes, int]:
     content, status = await _upstream_get(st["m3u8"])
-    if status != 200 or not content:
+    if status != 200 or not content or _is_placeholder(content):
         st2 = await _get_state(win_id, force=True)
         if st2 and st2.get("m3u8") and st2["m3u8"] != st["m3u8"]:
             content, status = await _upstream_get(st2["m3u8"])
@@ -513,7 +533,7 @@ async def stream_manifest(win_id: int):
     if not st or not st.get("m3u8"):
         raise HTTPException(404, "Трансляция не найдена")
     content, status = await _fetch_manifest(win_id, st)
-    if status != 200 or not content:
+    if status != 200 or not content or _is_placeholder(content):
         raise HTTPException(502, "Источник недоступен")
     text = content.decode("utf-8", errors="replace")
     return Response(
@@ -527,7 +547,25 @@ async def stream_manifest(win_id: int):
 async def stream_part(win_id: int, u: str = Query(..., description="Абсолютный upstream URL")):
     if not u.startswith("http"):
         raise HTTPException(400, "Bad url")
+
+    # подпись старше SIGN_TTL — подменяем ДО запроса: origin отдаёт
+    # протухшие URL и с 200 (заглушка placeholders/timeout.ts), поэтому
+    # старый фоллбэк «только при не-200» никогда не срабатывал
+    if _sign_age(u) > SIGN_TTL:
+        st = await _get_state(win_id)
+        if st and st.get("m3u8"):
+            u = _rekey(u, st["m3u8"])
+
     content, status = await _upstream_get(u)
+
+    # протухшая сессия вернула заглушку — перечитываем состояние
+    # принудительно и пробуем ещё раз со свежей подписью
+    if _is_manifest(u) and status in (200, 206) and _is_placeholder(content):
+        st = await _get_state(win_id, force=True)
+        if st and st.get("m3u8"):
+            u = _rekey(u, st["m3u8"])
+            content, status = await _upstream_get(u)
+
     if status not in (200, 206) or not content:
         # подпись протухла — берём свежий m3u8 и подменяем параметры подписи
         st = await _get_state(win_id, force=True)
@@ -537,6 +575,9 @@ async def stream_part(win_id: int, u: str = Query(..., description="Абсолю
         raise HTTPException(502, "Upstream недоступен")
 
     if _is_manifest(u):
+        if _is_placeholder(content):
+            # сессия умерла совсем — пусть клиент переключится на источник
+            raise HTTPException(502, "Источник отдаёт заглушку")
         return Response(
             content=_rewrite_playlist(content.decode("utf-8", errors="replace"), u, win_id),
             media_type="application/vnd.apple.mpegurl",
