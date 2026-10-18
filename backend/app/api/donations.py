@@ -100,32 +100,71 @@ async def create_donation(
     }
 
 
+def _verify_notification(fields: dict[str, str], secret: str) -> bool:
+    """Проверка подписи уведомления ЮMoney.
+
+    Новый формат (с 18.05.2026): sign = HMAC-SHA256 в HEX по строке из
+    URL-кодированных (RFC 3986) значений всех параметров, кроме sign,
+    отсортированных по алфавиту и склеенных через `&` в виде `key=value`.
+    Старый формат: sha1(notification_type&operation_id&amount&currency&
+    datetime&sender&codepro&secret&label).
+    """
+    if not secret:
+        return False
+    sign = fields.get("sign", "")
+    if sign:
+        sign_src = "&".join(
+            f"{key}={quote(val, safe='')}"
+            for key, val in sorted(fields.items())
+            if key != "sign"
+        )
+        expected = hmac.new(secret.encode(), sign_src.encode(), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(expected, sign)
+    sha1_hash = fields.get("sha1_hash", "")
+    if sha1_hash:
+        payload = (
+            f"{fields.get('notification_type', '')}&{fields.get('operation_id', '')}"
+            f"&{fields.get('amount', '')}&{fields.get('currency', '')}"
+            f"&{fields.get('datetime', '')}&{fields.get('sender', '')}"
+            f"&{fields.get('codepro', 'false')}&{secret}"
+            f"&{fields.get('label', '')}"
+        )
+        expected = hashlib.sha1(payload.encode()).hexdigest()
+        return hmac.compare_digest(expected, sha1_hash)
+    return False
+
+
 @router.post("/donations/webhook")
 async def yoomoney_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     form = await request.form()
+    fields = {str(k): str(v) for k, v in form.multi_items()}
 
-    notification_type = form.get("notification_type", "")
-    operation_id = form.get("operation_id", "")
-    amount_str = form.get("amount", "")
-    currency = form.get("currency", "")
-    dt = form.get("datetime", "")
-    sender = form.get("sender", "")
-    codepro = form.get("codepro", "false")
-    label = form.get("label", "")
-    sha1_hash = form.get("sha1_hash", "")
+    notification_type = fields.get("notification_type", "")
+    operation_id = fields.get("operation_id", "")
+    amount_str = fields.get("amount", "")
+    currency = fields.get("currency", "")
+    dt = fields.get("datetime", "")
+    sender = fields.get("sender", "")
+    codepro = fields.get("codepro", "false")
+    label = fields.get("label", "")
+    sha1_hash = fields.get("sha1_hash", "")
+    sign = fields.get("sign", "")
 
     secret = settings.YOOMONEY_SECRET
-    payload = (
-        f"{notification_type}&{operation_id}&{amount_str}&{currency}"
-        f"&{dt}&{sender}&{codepro}&{secret}&{label}"
-    )
-    expected = hashlib.sha1(payload.encode()).hexdigest()
+    signature_ok = _verify_notification(fields, secret)
 
-    if not hmac.compare_digest(expected, sha1_hash):
-        logger.warning("Donation webhook: invalid signature")
+    if not signature_ok:
+        logger.warning(
+            "Donation webhook: invalid signature; has_sign=%s has_sha1=%s "
+            "secret_len=%d fields=%s",
+            bool(sign),
+            bool(sha1_hash),
+            len(secret),
+            {k: v for k, v in fields.items() if k not in ("sign", "sha1_hash")},
+        )
         raise HTTPException(status_code=403, detail="Invalid signature")
 
     if codepro == "true":
