@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -108,6 +109,8 @@ class MainActivity : ComponentActivity() {
             var pendingMatch by remember { mutableStateOf<Match?>(null) }
             var updateInfo by remember { mutableStateOf<AppVersionInfo?>(null) }
             var updateStatus by remember { mutableStateOf<String?>(null) }
+            // Счёт по умолчанию скрыт при каждом открытии приложения (как спойлер на сайте)
+            var showScores by remember { mutableStateOf(false) }
             val scope = rememberCoroutineScope()
 
             LaunchedEffect(Unit) {
@@ -136,6 +139,8 @@ class MainActivity : ComponentActivity() {
                 matches = matches.filter { it.isLive },
                 error = error,
                 loading = loading,
+                showScores = showScores,
+                onToggleScores = { showScores = !showScores },
                 onMatchClick = { match ->
                     when {
                         match.playableSources.size > 1 -> pendingMatch = match
@@ -480,6 +485,12 @@ fun SourceChoiceDialog(match: Match, onChoice: (StreamUrl) -> Unit, onDismiss: (
                 color = Theme.textSecondary,
                 fontSize = 13.sp,
             )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Если видео низкого качества — выберите другой источник",
+                color = Theme.textMuted,
+                fontSize = 12.sp,
+            )
             Spacer(Modifier.height(16.dp))
             var otherNum = 0
             sources.forEachIndexed { index, src ->
@@ -618,6 +629,8 @@ fun HomeScreen(
     matches: List<Match>,
     error: String?,
     loading: Boolean,
+    showScores: Boolean,
+    onToggleScores: () -> Unit,
     onMatchClick: (Match) -> Unit,
 ) {
     val context = LocalContext.current
@@ -694,6 +707,13 @@ fun HomeScreen(
                 fontSize = 14.sp,
             )
             Spacer(Modifier.weight(1f))
+            if (screen == "home") {
+                HeaderButton(
+                    label = if (showScores) "Скрыть счет" else "Показать счет",
+                    selected = false,
+                ) { onToggleScores() }
+                Spacer(Modifier.width(10.dp))
+            }
             HeaderButton("Календарь", selected = screen == "calendar") { screen = "calendar" }
             Spacer(Modifier.width(10.dp))
             HeaderButton("Таблица", selected = screen == "table") { screen = "table" }
@@ -709,6 +729,7 @@ fun HomeScreen(
             "calendar" -> CalendarSection(
                 matches = calendarMatches,
                 loading = calendarLoading,
+                showScores = showScores,
                 onMatchClick = onMatchClick,
             )
             "table" -> StandingsSection(
@@ -721,10 +742,10 @@ fun HomeScreen(
                 contentPadding = PaddingValues(vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-                if (khl.isNotEmpty()) item { LeagueRow("КХЛ", "KHL", khl, onMatchClick) }
-                if (nhl.isNotEmpty()) item { LeagueRow("НХЛ", "NHL", nhl, onMatchClick) }
-                if (vhl.isNotEmpty()) item { LeagueRow("ВХЛ", "VHL", vhl, onMatchClick) }
-                if (mhl.isNotEmpty()) item { LeagueRow("МХЛ", "MHL", mhl, onMatchClick) }
+                if (khl.isNotEmpty()) item { LeagueRow("КХЛ", "KHL", khl, showScores, onMatchClick) }
+                if (nhl.isNotEmpty()) item { LeagueRow("НХЛ", "NHL", nhl, showScores, onMatchClick) }
+                if (vhl.isNotEmpty()) item { LeagueRow("ВХЛ", "VHL", vhl, showScores, onMatchClick) }
+                if (mhl.isNotEmpty()) item { LeagueRow("МХЛ", "MHL", mhl, showScores, onMatchClick) }
                 if (!loading && error == null && matches.isEmpty()) {
                     item {
                         Text(
@@ -764,6 +785,7 @@ fun HeaderButton(label: String, selected: Boolean, onClick: () -> Unit) {
 fun CalendarSection(
     matches: List<Match>,
     loading: Boolean,
+    showScores: Boolean,
     onMatchClick: (Match) -> Unit,
 ) {
     if (loading) {
@@ -806,7 +828,7 @@ fun CalendarSection(
         for ((date, list) in grouped) {
             item(key = "day_$date") { CalendarDayHeader(date, today) }
             items(list, key = { "${it.league}|${it.matchUid ?: it.id}|${it.datetimeUtc}" }) { m ->
-                CalendarRow(match = m, onClick = { onMatchClick(m) })
+                CalendarRow(match = m, showScores = showScores, onClick = { onMatchClick(m) })
             }
         }
     }
@@ -838,7 +860,7 @@ fun CalendarDayHeader(date: java.time.LocalDate, today: java.time.LocalDate) {
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-fun CalendarRow(match: Match, onClick: () -> Unit) {
+fun CalendarRow(match: Match, showScores: Boolean, onClick: () -> Unit) {
     val time = runCatching {
         java.time.Instant.parse(match.datetimeUtc)
             .atZone(java.time.ZoneId.systemDefault())
@@ -879,7 +901,7 @@ fun CalendarRow(match: Match, onClick: () -> Unit) {
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(12.dp))
-            CalendarCenter(match)
+            CalendarCenter(match, showScores)
             Spacer(Modifier.width(12.dp))
             Text(
                 text = match.teamAway,
@@ -897,7 +919,7 @@ fun CalendarRow(match: Match, onClick: () -> Unit) {
 }
 
 @Composable
-fun CalendarCenter(match: Match) {
+fun CalendarCenter(match: Match, showScores: Boolean) {
     when {
         match.isLive -> Row(verticalAlignment = Alignment.CenterVertically) {
             Text(text = "●", color = Theme.live, fontSize = 10.sp)
@@ -908,7 +930,7 @@ fun CalendarCenter(match: Match) {
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
             )
-            if (match.displayScore.isNotEmpty()) {
+            if (showScores && match.displayScore.isNotEmpty()) {
                 Spacer(Modifier.width(8.dp))
                 Text(
                     text = match.displayScore,
@@ -918,17 +940,24 @@ fun CalendarCenter(match: Match) {
                 )
             }
         }
-        match.status == "finished" && match.displayScore.isNotEmpty() -> Text(
-            text = match.displayScore,
-            color = Theme.textSecondary,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.Bold,
-        )
+        match.status == "finished" && match.displayScore.isNotEmpty() ->
+            if (showScores) {
+                Text(
+                    text = match.displayScore,
+                    color = Theme.textSecondary,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            } else {
+                // счёт спрятан — показываем заглушку, как на сайте
+                Text(text = "vs", color = Theme.textMuted, fontSize = 14.sp)
+            }
         else -> Text(text = "vs", color = Theme.textMuted, fontSize = 14.sp)
     }
 }
 
 private val khlTableCols = listOf(44.dp, 44.dp, 48.dp, 48.dp, 44.dp, 80.dp, 52.dp)
+private val khlTableColsCompact = listOf(34.dp, 34.dp, 40.dp, 40.dp, 34.dp, 66.dp, 44.dp)
 
 @Composable
 fun StandingsSection(
@@ -954,63 +983,98 @@ fun StandingsSection(
                 "Western Conference" to "Западная конференция",
                 "Eastern Conference" to "Восточная конференция",
             )
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 8.dp),
+            // Обе конференции на одном экране, без прокрутки: строки
+            // распределяются по высоте весами и всегда помещаются.
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 32.dp),
             ) {
-                item(key = "title") {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     Text(
                         text = "Турнирная таблица КХЛ",
                         color = Theme.text,
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp),
                     )
-                }
-                for (g in data.groups) {
-                    item(key = "g_${g.name}") {
-                        Text(
-                            text = confNames[g.name] ?: g.name,
-                            color = Theme.accent,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 32.dp, vertical = 10.dp),
-                        )
-                    }
-                    item(key = "h_${g.name}") { StandingsHeaderRow() }
-                    items(g.rows, key = { "r_${g.name}_${it.position}" }) { row ->
-                        StandingsRowView(row)
-                    }
-                }
-                item(key = "foot") {
+                    Spacer(Modifier.weight(1f))
                     Text(
                         text = "Данные официального API КХЛ · сезон ${data.season}",
                         color = Theme.textMuted,
                         fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 32.dp, vertical = 16.dp),
                     )
+                }
+                Spacer(Modifier.height(8.dp))
+                if (data.groups.isEmpty()) {
+                    Text(
+                        text = "Нет данных таблицы",
+                        color = Theme.textSecondary,
+                        fontSize = 16.sp,
+                    )
+                } else {
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        for ((i, g) in data.groups.withIndex()) {
+                            ConferenceTable(
+                                name = confNames[g.name] ?: g.name,
+                                rows = g.rows,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (i < data.groups.lastIndex) Spacer(Modifier.width(28.dp))
+                        }
+                    }
                 }
             }
         }
     }
 }
 
+/** Одна конференция: заголовок, шапка колонок, строки без скролла. */
 @Composable
-fun StandingsHeaderRow() {
+fun ConferenceTable(name: String, rows: List<StandingsRow>, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.fillMaxHeight(),
+    ) {
+        Text(
+            text = name,
+            color = Theme.accent,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(vertical = 6.dp),
+        )
+        StandingsHeaderRow(compact = true)
+        for (row in rows) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                StandingsRowView(row, compact = true)
+            }
+        }
+    }
+}
+
+@Composable
+fun StandingsHeaderRow(compact: Boolean = false) {
+    val cols = if (compact) khlTableColsCompact else khlTableCols
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 32.dp, vertical = 6.dp),
+            .padding(horizontal = if (compact) 0.dp else 32.dp, vertical = if (compact) 2.dp else 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = "#",
             color = Theme.textMuted,
             fontSize = 12.sp,
-            modifier = Modifier.width(34.dp),
+            modifier = Modifier.width(if (compact) 24.dp else 34.dp),
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.width(34.dp))
+        Spacer(Modifier.width(if (compact) 30.dp else 34.dp))
         Text(
             text = "КОМАНДА",
             color = Theme.textMuted,
@@ -1023,7 +1087,7 @@ fun StandingsHeaderRow() {
                 text = l,
                 color = Theme.textMuted,
                 fontSize = 12.sp,
-                modifier = Modifier.width(khlTableCols[i]),
+                modifier = Modifier.width(cols[i]),
                 textAlign = TextAlign.Center,
             )
         }
@@ -1031,26 +1095,30 @@ fun StandingsHeaderRow() {
 }
 
 @Composable
-fun StandingsRowView(row: StandingsRow) {
+fun StandingsRowView(row: StandingsRow, compact: Boolean = false) {
+    val cols = if (compact) khlTableColsCompact else khlTableCols
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 32.dp, vertical = 7.dp),
+            .padding(
+                horizontal = if (compact) 0.dp else 32.dp,
+                vertical = if (compact) 4.dp else 7.dp,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = "${row.position}",
             color = Theme.textSecondary,
-            fontSize = 14.sp,
-            modifier = Modifier.width(34.dp),
+            fontSize = if (compact) 13.sp else 14.sp,
+            modifier = Modifier.width(if (compact) 24.dp else 34.dp),
             textAlign = TextAlign.Center,
         )
-        TeamLogo(row.teamName, size = 26.dp)
-        Spacer(Modifier.width(8.dp))
+        TeamLogo(row.teamName, size = if (compact) 22.dp else 26.dp)
+        Spacer(Modifier.width(if (compact) 6.dp else 8.dp))
         Text(
             text = row.teamName,
             color = Theme.text,
-            fontSize = 14.sp,
+            fontSize = if (compact) 13.sp else 14.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             modifier = Modifier.weight(1f),
@@ -1067,24 +1135,30 @@ fun StandingsRowView(row: StandingsRow) {
             Text(
                 text = v,
                 color = Theme.textSecondary,
-                fontSize = 13.sp,
-                modifier = Modifier.width(khlTableCols[i]),
+                fontSize = if (compact) 12.sp else 13.sp,
+                modifier = Modifier.width(cols[i]),
                 textAlign = TextAlign.Center,
             )
         }
         Text(
             text = "${row.points}",
             color = Theme.accent,
-            fontSize = 16.sp,
+            fontSize = if (compact) 14.sp else 16.sp,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.width(khlTableCols[6]),
+            modifier = Modifier.width(cols[6]),
             textAlign = TextAlign.Center,
         )
     }
 }
 
 @Composable
-fun LeagueRow(title: String, leagueCode: String?, matches: List<Match>, onMatchClick: (Match) -> Unit) {
+fun LeagueRow(
+    title: String,
+    leagueCode: String?,
+    matches: List<Match>,
+    showScores: Boolean,
+    onMatchClick: (Match) -> Unit,
+) {
     Column {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -1106,7 +1180,7 @@ fun LeagueRow(title: String, leagueCode: String?, matches: List<Match>, onMatchC
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             items(matches, key = { it.id }) { match ->
-                MatchCard(match = match, onClick = { onMatchClick(match) })
+                MatchCard(match = match, showScores = showScores, onClick = { onMatchClick(match) })
             }
         }
     }
@@ -1114,7 +1188,7 @@ fun LeagueRow(title: String, leagueCode: String?, matches: List<Match>, onMatchC
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-fun MatchCard(match: Match, onClick: () -> Unit) {
+fun MatchCard(match: Match, showScores: Boolean, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         colors = ClickableSurfaceDefaults.colors(
@@ -1174,15 +1248,23 @@ fun MatchCard(match: Match, onClick: () -> Unit) {
                     modifier = Modifier.weight(1f),
                 )
             }
-            if (match.displayScore.isNotEmpty()) {
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    text = match.displayScore,
-                    color = Theme.accent,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                )
+            // Счёт: скрыт — заглушка (период либо VS), как на сайте
+            val scoreText = when {
+                !showScores -> match.currentPeriod ?: "VS"
+                match.displayScore.isNotEmpty() -> match.displayScore
+                else -> match.currentPeriod ?: "VS"
             }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = scoreText,
+                color = if (showScores && match.displayScore.isNotEmpty()) {
+                    Theme.accent
+                } else {
+                    Theme.textMuted
+                },
+                fontSize = if (showScores && match.displayScore.isNotEmpty()) 24.sp else 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
         }
     }
 }

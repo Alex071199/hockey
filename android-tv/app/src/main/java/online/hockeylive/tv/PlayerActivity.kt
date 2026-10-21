@@ -557,6 +557,23 @@ class PlayerActivity : ComponentActivity() {
         }
 
         val homeId = info?.homeTeamId ?: 0
+        // Куда класть строку: если id команды не пришёл (0) — определяем по ФИО
+        // из составов, иначе удаления/голы с team_id=0 уезжали в чужую колонку.
+        val homeNames = (s.rosters?.home ?: emptyList())
+            .mapNotNull { p -> p.name.trim().lowercase().takeIf { it.isNotEmpty() } }
+            .toSet()
+        val awayNames = (s.rosters?.away ?: emptyList())
+            .mapNotNull { p -> p.name.trim().lowercase().takeIf { it.isNotEmpty() } }
+            .toSet()
+        fun isHomeSide(teamId: Int, name: String): Boolean {
+            if (homeId != 0 && teamId != 0) return teamId == homeId
+            val n = name.trim().lowercase()
+            if (n.isNotEmpty()) {
+                if (n in homeNames && n !in awayNames) return true
+                if (n in awayNames && n !in homeNames) return false
+            }
+            return teamId == homeId
+        }
         val serverBase = AppSettings.serverUrl(this).trimEnd('/')
         if (s.goals.isNotEmpty()) {
             sectionTitle("Авторы шайб")
@@ -568,7 +585,7 @@ class PlayerActivity : ComponentActivity() {
             val colHome = goalColumn()
             val colAway = goalColumn()
             for (g in s.goals) {
-                val target = if (g.teamId == homeId) colHome else colAway
+                val target = if (isHomeSide(g.teamId, g.scorer)) colHome else colAway
                 target.addView(goalRow(g, images, serverBase))
             }
             if (colHome.childCount == 0) colHome.addView(emptyColMarker())
@@ -599,7 +616,7 @@ class PlayerActivity : ComponentActivity() {
             val colHome = goalColumn()
             val colAway = goalColumn()
             for (pen in s.penalties) {
-                val target = if (pen.teamId == homeId) colHome else colAway
+                val target = if (isHomeSide(pen.teamId, pen.player)) colHome else colAway
                 target.addView(penaltyRow(pen))
             }
             if (colHome.childCount == 0) colHome.addView(emptyColMarker())

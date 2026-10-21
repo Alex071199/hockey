@@ -132,6 +132,10 @@ object ApiClient {
      * Календарь на ближайшие `days` дней (сегодня + остальные) по локальной
      * дате устройства: КХЛ — официальный полный календарь сезона,
      * НХЛ — посуточные запросы к /api/schedule (сервер режет по tz_offset).
+     *
+     * Строки /api/schedule (они несут stream_urls/current_period) вкладываются
+     * в официальные календарные строки КХЛ — иначе клик по матчу КХЛ из
+     * календаря не находит источники и открывает плеер нельзя.
      */
     suspend fun fetchCalendarMatches(server: String, days: Int = 7): List<Match> {
         val zone = java.time.ZoneId.systemDefault()
@@ -140,45 +144,97 @@ object ApiClient {
         val windowEnd = today.plusDays(days.toLong()).atStartOfDay(zone).toInstant()
         val tzOffsetMin = java.util.TimeZone.getDefault().rawOffset / 60_000
 
+        // Расписание по всем дням окна: КХЛ и НХЛ, с потоками и текущим периодом
+        val sched = mutableListOf<Match>()
+        for (i in 0 until days) {
+            val d = today.plusDays(i.toLong()).toString()
+            sched += fetchScheduleDate(server, d, tzOffsetMin)
+                .filter {
+                    it.league.equals("KHL", true) || it.league.equals("NHL", true)
+                }
+        }
+
+        fun instantOf(m: Match): java.time.Instant? =
+            runCatching { java.time.Instant.parse(m.datetimeUtc) }.getOrNull()
+
+        fun norm(s: String) = s.trim().lowercase()
+
+        fun sameTeam(a: String, b: String): Boolean {
+            val x = norm(a)
+            val y = norm(b)
+            return x.isNotEmpty() && y.isNotEmpty() && (x == y || x.contains(y) || y.contains(x))
+        }
+
+        // Индекс расписания: лига + момент старта -> строки (одновременные игры
+        // в одной лиге разрешаем по совпадению названий команд)
+        val schedByKey = HashMap<String, MutableList<Match>>()
+        for (m in sched) {
+            val inst = instantOf(m) ?: continue
+            schedByKey
+                .getOrPut("${m.league.uppercase()}|$inst") { mutableListOf() }
+                .add(m)
+        }
+        val schedMatched = HashSet<Match>()
+
+        fun findSched(m: Match): Match? {
+            val inst = instantOf(m) ?: return null
+            val candidates = schedByKey["${m.league.uppercase()}|$inst"]
+                ?.takeIf { it.isNotEmpty() } ?: return null
+            candidates.firstOrNull { s ->
+                (sameTeam(m.teamHome, s.teamHome) && sameTeam(m.teamAway, s.teamAway)) ||
+                    (sameTeam(m.teamHome, s.teamAway) && sameTeam(m.teamAway, s.teamHome))
+            }?.let { return it }
+            return if (candidates.size == 1) candidates.first() else null
+        }
+
         val out = mutableListOf<Match>()
 
         fetchKhlCalendar(server)?.let { cal ->
             for (e in cal.matches) {
                 val inst = runCatching { java.time.Instant.parse(e.startUtc) }.getOrNull() ?: continue
                 if (inst < windowStart || inst >= windowEnd) continue
-                out.add(
-                    Match(
-                        id = (e.id ?: 0L).toInt(),
-                        matchUid = "KHL_${e.id}",
-                        league = "KHL",
-                        teamHome = e.home,
-                        teamAway = e.away,
-                        datetimeUtc = e.startUtc,
-                        status = when (e.status) {
-                            "finished" -> "finished"
-                            "in_progress" -> "live"
-                            else -> "planned"
-                        },
-                        homeScore = e.scoreHome,
-                        awayScore = e.scoreAway,
-                    ),
+                val official = Match(
+                    id = (e.id ?: 0L).toInt(),
+                    matchUid = "KHL_${e.id}",
+                    league = "KHL",
+                    teamHome = e.home,
+                    teamAway = e.away,
+                    datetimeUtc = e.startUtc,
+                    status = when (e.status) {
+                        "finished" -> "finished"
+                        "in_progress" -> "live"
+                        else -> "planned"
+                    },
+                    homeScore = e.scoreHome,
+                    awayScore = e.scoreAway,
                 )
+                // Вкладываем потоки/период из расписания (у официального календаря их нет)
+                val s = findSched(official)
+                if (s != null) {
+                    schedMatched.add(s)
+                    out.add(
+                        official.copy(
+                            streamUrls = s.streamUrls,
+                            currentPeriod = s.currentPeriod,
+                        ),
+                    )
+                } else {
+                    out.add(official)
+                }
             }
         }
 
-        for (i in 0 until days) {
-            val d = today.plusDays(i.toLong()).toString()
-            out += fetchScheduleDate(server, d, tzOffsetMin)
-                .filter { it.league.equals("NHL", true) }
+        // Строки расписания, не совпавшие с официальным календарём (НХЛ и прочее)
+        for (m in sched) {
+            if (m in schedMatched) continue
+            val inst = instantOf(m) ?: continue
+            if (inst < windowStart || inst >= windowEnd) continue
+            out.add(m)
         }
 
         return out
             .distinctBy {
                 it.matchUid ?: "${it.league}_${it.datetimeUtc}_${it.teamHome}_${it.teamAway}"
-            }
-            .filter { m ->
-                val inst = runCatching { java.time.Instant.parse(m.datetimeUtc) }.getOrNull()
-                inst != null && inst >= windowStart && inst < windowEnd
             }
             .sortedBy { it.datetimeUtc }
     }

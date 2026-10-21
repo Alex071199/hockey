@@ -365,6 +365,28 @@ async def _build_match_stats(event_id: int, max_age: float = 300) -> dict:
     team_a = detail.get("team_a", {})
     team_b = detail.get("team_b", {})
 
+    # Индекс игрок -> команда: у часть нарушений violator приходит без team,
+    # и штраф уезжал в чужую колонку home/away. Составы есть в тех же данных.
+    _player_team: dict[int, int] = {}
+    for _t, _tid in ((team_a, team_a.get("id", 0)), (team_b, team_b.get("id", 0))):
+        if not _tid:
+            continue
+        for _p in _t.get("players") or []:
+            _pid = _p.get("id")
+            if _pid:
+                _player_team[int(_pid)] = int(_tid)
+
+    def _person_team_id(person: dict) -> int:
+        tid = ((person.get("team") or {}).get("id")) or person.get("team_id") or 0
+        if tid:
+            return int(tid)
+        pid = person.get("id")
+        if pid:
+            tid = _player_team.get(int(pid), 0)
+            if tid:
+                return tid
+        return 0
+
     def _team_stats(t: dict) -> dict:
         return {
             "shots": t.get("shots", 0) or 0,
@@ -387,7 +409,7 @@ async def _build_match_stats(event_id: int, max_age: float = 300) -> dict:
                 "time": g.get("time_s") or _seconds_to_time(g.get("time", 0)),
                 "score": g.get("score", ""),
                 "period": g.get("period", 0),
-                "team_id": author.get("team_id", 0),
+                "team_id": int(author.get("team_id") or 0) or _person_team_id(author),
                 "scorer": author.get("name", ""),
                 "assistants": [
                     a.get("name", "") for a in g.get("assistants", [])
@@ -398,13 +420,15 @@ async def _build_match_stats(event_id: int, max_age: float = 300) -> dict:
     def _penalties_list() -> list[dict]:
         result = []
         for v in violations:
+            violator = v.get("violator") or {}
+            team_id = _person_team_id(violator) or _person_team_id(v)
             result.append({
                 "time": v.get("time_s") or _seconds_to_time(v.get("time", 0)),
                 "period": v.get("period", 0),
                 "reason": v.get("penalty_reason", ""),
                 "minutes": v.get("penalty_time", 0),
-                "player": (v.get("violator") or {}).get("name", ""),
-                "team_id": ((v.get("violator") or {}).get("team") or {}).get("id", 0),
+                "player": violator.get("name", ""),
+                "team_id": team_id,
             })
         return result
 
