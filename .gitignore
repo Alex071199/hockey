@@ -42,7 +42,8 @@ debug_*.html
 
 # Generated/downloaded data
 /standings.json
-tv_codes.json
+HockeyLiveTV.apk
+acestreamtest/acestreamtest.apk
 /teams_check.txt
 /liga/
 /logos/
