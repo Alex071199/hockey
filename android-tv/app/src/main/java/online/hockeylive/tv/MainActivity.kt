@@ -494,11 +494,13 @@ fun SourceChoiceDialog(match: Match, onChoice: (StreamUrl) -> Unit, onDismiss: (
             Spacer(Modifier.height(16.dp))
             var otherNum = 0
             sources.forEachIndexed { index, src ->
-                val label = if (src.source.equals("prime", true)) {
-                    "Прайм"
-                } else {
-                    otherNum++
-                    "Источник $otherNum"
+                val label = when {
+                    src.isAcestream -> "Лучшее качество"
+                    src.source.equals("prime", true) -> "Прайм"
+                    else -> {
+                        otherNum++
+                        "Источник $otherNum"
+                    }
                 }
                 Surface(
                     onClick = { onChoice(src) },
@@ -730,7 +732,6 @@ fun HomeScreen(
                 matches = calendarMatches,
                 loading = calendarLoading,
                 showScores = showScores,
-                onMatchClick = onMatchClick,
             )
             "table" -> StandingsSection(
                 data = standings,
@@ -786,7 +787,6 @@ fun CalendarSection(
     matches: List<Match>,
     loading: Boolean,
     showScores: Boolean,
-    onMatchClick: (Match) -> Unit,
 ) {
     if (loading) {
         Text(
@@ -828,7 +828,7 @@ fun CalendarSection(
         for ((date, list) in grouped) {
             item(key = "day_$date") { CalendarDayHeader(date, today) }
             items(list, key = { "${it.league}|${it.matchUid ?: it.id}|${it.datetimeUtc}" }) { m ->
-                CalendarRow(match = m, showScores = showScores, onClick = { onMatchClick(m) })
+                CalendarRow(match = m, showScores = showScores)
             }
         }
     }
@@ -858,29 +858,21 @@ fun CalendarDayHeader(date: java.time.LocalDate, today: java.time.LocalDate) {
     )
 }
 
-@OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-fun CalendarRow(match: Match, showScores: Boolean, onClick: () -> Unit) {
+fun CalendarRow(match: Match, showScores: Boolean) {
     val time = runCatching {
         java.time.Instant.parse(match.datetimeUtc)
             .atZone(java.time.ZoneId.systemDefault())
             .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
     }.getOrDefault("")
 
-    Surface(
-        onClick = onClick,
-        colors = ClickableSurfaceDefaults.colors(
-            containerColor = Theme.card,
-            focusedContainerColor = Theme.cardHover,
-        ),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Theme.card)
+            .padding(horizontal = 32.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 32.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
             Text(
                 text = time,
                 color = Theme.text,
@@ -914,7 +906,6 @@ fun CalendarRow(match: Match, showScores: Boolean, onClick: () -> Unit) {
             )
             Spacer(Modifier.width(10.dp))
             TeamLogo(match.teamAway, size = 34.dp)
-        }
     }
 }
 

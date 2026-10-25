@@ -193,12 +193,8 @@ export default function SchedulePage() {
   }, [filteredApi, searchedTeam, favoritesOnly, favorites]);
 
   const finalKhl = useMemo(() => {
-    const apiTeamPairs = new Set(
-      apiMatches.map((m) => `${m.team_home}|${m.team_away}`)
-    );
-    let result = khlMatches.filter(
-      (m) => !apiTeamPairs.has(`${m.home}|${m.away}`) && !apiTeamPairs.has(`${m.away}|${m.home}`)
-    );
+    const apiTeamPairs = new Set(apiMatches.map((m) => pairKey(m.team_home, m.team_away)));
+    let result = khlMatches.filter((m) => !apiTeamPairs.has(pairKey(m.home, m.away)));
     if (searchedTeam) {
       result = result.filter((m) => m.home === searchedTeam || m.away === searchedTeam);
     }

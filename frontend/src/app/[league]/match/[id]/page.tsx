@@ -44,8 +44,19 @@ interface Match {
   sp_match_id?: number | null;
 }
 
+function isAceStream(s: Stream) {
+  return s.source === "acestream" || s.url.startsWith("acestream://");
+}
+
+function streamButtonLabel(s: Stream, index: number): string {
+  if (isAceStream(s)) return "Лучшее качество";
+  if (s.source === "prime") return "PRIME";
+  return `Источник #${index + 1}`;
+}
+
 function sourcePriority(s: Stream) {
   const u = s.url;
+  if (isAceStream(s)) return -2;
   if (s.source === "prime") return -1;
   if (/vk\.com|vkvideo\.ru|vkvideo\.rs/.test(u)) return 0;
   if (/rutube\.ru/.test(u)) return 2;
@@ -80,7 +91,6 @@ function sortStreams(list: Stream[]) {
       }
       return { ...s, url };
     })
-    .filter((s) => s.source !== "acestream" && !s.url.startsWith("acestream://"))
     .sort((a, b) => sourcePriority(a) - sourcePriority(b))
     // дедуп после сортировки: при одинаковых URL выживает источник
     // с высшим приоритетом (PRIME, а не livetv-дубль того же embed)
@@ -436,7 +446,7 @@ export default function MatchPage() {
                         : "bg-hockey-card border border-hockey-border text-hockey-text-secondary hover:text-white hover:border-hockey-border-light"
                     }`}
                   >
-                    {s.source === "prime" ? "PRIME" : `Источник #${i + 1}`}
+                    {streamButtonLabel(s, i)}
                   </button>
                 ))}
               </div>

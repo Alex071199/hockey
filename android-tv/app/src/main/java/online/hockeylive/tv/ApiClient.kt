@@ -157,7 +157,24 @@ object ApiClient {
         fun instantOf(m: Match): java.time.Instant? =
             runCatching { java.time.Instant.parse(m.datetimeUtc) }.getOrNull()
 
-        fun norm(s: String) = s.trim().lowercase()
+        fun norm(s: String) = s.trim().lowercase().let { k ->
+            when (k) {
+                "драконы" -> "шанхайские драконы"
+                "динамо минск" -> "динамо мн"
+                "сочи" -> "хк сочи"
+                else -> k
+            }
+        }
+
+        fun calendarDedupKey(m: Match): String {
+            // Минутная точность: официальный калendar и /api/schedule иногда
+            // расходятся на секунды, из‑за чего матч показывался дважды.
+            val instMin = instantOf(m)?.epochSecond?.div(60) ?: 0L
+            val a = norm(m.teamHome)
+            val b = norm(m.teamAway)
+            val pair = if (a <= b) "$a|$b" else "$b|$a"
+            return "${m.league.uppercase()}|$pair|$instMin"
+        }
 
         fun sameTeam(a: String, b: String): Boolean {
             val x = norm(a)
@@ -233,8 +250,10 @@ object ApiClient {
         }
 
         return out
-            .distinctBy {
-                it.matchUid ?: "${it.league}_${it.datetimeUtc}_${it.teamHome}_${it.teamAway}"
+            .groupBy { calendarDedupKey(it) }
+            .values
+            .map { group ->
+                group.maxByOrNull { it.streamUrls.size } ?: group.first()
             }
             .sortedBy { it.datetimeUtc }
     }

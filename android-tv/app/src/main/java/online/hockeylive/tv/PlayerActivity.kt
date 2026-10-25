@@ -27,9 +27,14 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.load
 import coil.transform.CircleCropTransformation
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import online.hockeylive.tv.ace.AceRuntime
+import online.hockeylive.tv.ace.AceStreamClient
 import java.net.URLEncoder
 
 class PlayerActivity : ComponentActivity() {
@@ -52,6 +57,9 @@ class PlayerActivity : ComponentActivity() {
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var webTimeout: Runnable? = null
     private var changingSource = false
+
+    // Задача запуска AceStream (P2P) для текущего источника
+    private var aceJob: Job? = null
 
     // Overlay статистики (стрелка вниз на пульте)
     private var statsRoot: FrameLayout? = null
@@ -223,10 +231,41 @@ class PlayerActivity : ComponentActivity() {
         val src = sources[sourceIndex]
         val title = match?.let { "${it.teamHome} — ${it.teamAway}" } ?: ""
         showStatsHint()
-        if (src.isHls) {
-            startExoPlayer(src.url, title, src)
-        } else {
-            startWebView(src.url, title)
+        when {
+            src.isAcestream -> startAceStream(src, title)
+            src.isHls -> startExoPlayer(src.url, title, src)
+            else -> startWebView(src.url, title)
+        }
+    }
+
+    // AceStream: распаковка/запуск встроенного P2P-движка, затем telnet-сессия
+    // и обычный ExoPlayer на локальный http-url движка.
+    private fun startAceStream(src: StreamUrl, title: String) {
+        playerView?.visibility = View.GONE
+        webView?.visibility = View.GONE
+        cancelWebTimeout()
+        aceJob?.cancel()
+        aceJob = lifecycleScope.launch {
+            try {
+                showStatus("Запуск P2P-движка…\n$title")
+                withContext(Dispatchers.IO) {
+                    AceRuntime.ensureStarted(this@PlayerActivity) { msg ->
+                        runOnUiThread { showStatus("$msg\n$title") }
+                    }
+                }
+                val value = src.url
+                    .substringAfter("://")
+                    .substringBefore("?")
+                    .substringBefore("/")
+                    .trim()
+                val url = AceStreamClient.startSmart(value) { msg ->
+                    runOnUiThread { showStatus("$msg\n$title") }
+                }
+                startExoPlayer(url, title, src)
+            } catch (e: Exception) {
+                runCatching { AceStreamClient.stop() }
+                nextSource("ace ${e.message?.take(50) ?: "error"}")
+            }
         }
     }
 
@@ -237,6 +276,11 @@ class PlayerActivity : ComponentActivity() {
         val prev = sourceIndex
         sourceIndex++
         if (sourceIndex in sources.indices) {
+            val prevAce = sources[prev].isAcestream
+            if (prevAce && !sources[sourceIndex].isAcestream) {
+                AceStreamClient.stopAsync()
+            }
+            aceJob?.cancel()
             cancelWebTimeout()
             webView?.stopLoading()
             releasePlayer()
@@ -840,6 +884,8 @@ class PlayerActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         cancelWebTimeout()
+        aceJob?.cancel()
+        AceStreamClient.stopAsync()
         releasePlayer()
         webView?.destroy()
         webView = null

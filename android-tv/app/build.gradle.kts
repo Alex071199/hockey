@@ -13,8 +13,8 @@ android {
         applicationId = "online.hockeylive.tv"
         minSdk = 21
         targetSdk = 34
-        versionCode = 14
-        versionName = "1.13"
+        versionCode = 15
+        versionName = "1.14-ace-test"
     }
 
     signingConfigs {
@@ -47,6 +47,14 @@ android {
         compose = true
         buildConfig = true
         aidl = true
+    }
+
+    packaging {
+        jniLibs {
+            // libacepython.so должен физически распаковаться на диск,
+            // иначе процесс движка не запускается (aceHub approach)
+            useLegacyPackaging = true
+        }
     }
 }
 

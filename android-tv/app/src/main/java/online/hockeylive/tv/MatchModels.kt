@@ -19,8 +19,12 @@ data class StreamUrl(
             return false
         }
 
+    val isAcestream: Boolean
+        get() = source.equals("acestream", true) || url.startsWith("acestream://", true)
+
     val displayName: String
         get() = when {
+            isAcestream -> "Лучшее качество"
             source == "prime" -> "Прайм"
             source == "sportplustv" -> "Спорт Плюс"
             source == "rutube" -> "Rutube"
@@ -48,9 +52,12 @@ data class Match(
 
     val playableSources: List<StreamUrl>
         get() = streamUrls
-            .filter { !it.source.equals("acestream", true) && it.url.isNotBlank() }
+            .filter { it.url.isNotBlank() }
             .distinctBy { it.source + "|" + it.url }
-            .sortedByDescending { it.source.equals("prime", true) }
+            .sortedWith(
+                compareByDescending<StreamUrl> { it.isAcestream }
+                    .thenByDescending { it.source.equals("prime", true) },
+            )
 
     val displayScore: String
         get() = if (homeScore != null && awayScore != null) "$homeScore : $awayScore" else ""
