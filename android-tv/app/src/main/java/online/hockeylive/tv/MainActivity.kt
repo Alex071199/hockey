@@ -189,13 +189,19 @@ class MainActivity : ComponentActivity() {
                         launchPlayer(context, m, source)
                     },
                     onDismiss = { pendingMatch = null },
-                )
+            updateInfo?.let { info ->
             }
 
             updateInfo?.let { info ->
                 UpdateDialog(
                     info = info,
-                    status = updateStatus,
+                        if (info.apk_url != null) {
+                            UpdateChecker.downloadAndInstall(context, info.apk_url) { s ->
+                                updateStatus = s
+                            }
+                        } else {
+                            updateStatus = "Ошибка: отсутствует URL APK"
+                        }
                     onUpdate = {
                         updateStatus = "Скачиваю…"
                         UpdateChecker.downloadAndInstall(context, info.apk_url!!) { s ->
@@ -553,6 +559,14 @@ fun SourceChoiceDialog(match: Match, onChoice: (StreamUrl) -> Unit, onDismiss: (
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun UpdateDialog(info: AppVersionInfo, status: String?, onUpdate: () -> Unit, onDismiss: () -> Unit) {
+    // Авто-инициализация обновления если сервер принудительно требует апдейт
+    val autoTriggered = remember { androidx.compose.runtime.mutableStateOf(false) }
+    if (info.force_update && !autoTriggered.value) {
+        LaunchedEffect(Unit) {
+            onUpdate()
+            autoTriggered.value = true
+        }
+    }
     Dialog(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier

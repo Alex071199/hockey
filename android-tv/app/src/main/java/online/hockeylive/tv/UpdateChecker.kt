@@ -20,6 +20,7 @@ data class AppVersionInfo(
     val version_code: Int = 0,
     val apk_url: String? = null,
     val notes: String = "",
+    val force_update: Boolean = false,
 )
 
 object UpdateChecker {
