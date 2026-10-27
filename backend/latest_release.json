@@ -1,7 +1,7 @@
 {
-  "version": "1.14",
-  "version_code": 15,
+  "version": "1.15",
+  "version_code": 16,
   "apk_url": "https://hockey-live-production-b0cc.up.railway.app/api/app/apk",
-  "notes": "Улучшен OTA: принудительное обновление при наличии критических исправлений. Возможность триггерить обновление по push-сообщению.",
+  "notes": "Исправлена загрузка приложения, календарь без дублей и без лишних действий, источник AceStream подписан «Лучшее качество».",
   "force_update": true
 }

@@ -189,23 +189,21 @@ class MainActivity : ComponentActivity() {
                         launchPlayer(context, m, source)
                     },
                     onDismiss = { pendingMatch = null },
-            updateInfo?.let { info ->
+                )
             }
 
             updateInfo?.let { info ->
                 UpdateDialog(
                     info = info,
+                    status = updateStatus,
+                    onUpdate = {
                         if (info.apk_url != null) {
+                            updateStatus = "Скачиваю…"
                             UpdateChecker.downloadAndInstall(context, info.apk_url) { s ->
                                 updateStatus = s
                             }
                         } else {
                             updateStatus = "Ошибка: отсутствует URL APK"
-                        }
-                    onUpdate = {
-                        updateStatus = "Скачиваю…"
-                        UpdateChecker.downloadAndInstall(context, info.apk_url!!) { s ->
-                            updateStatus = s
                         }
                     },
                     onDismiss = { updateInfo = null },

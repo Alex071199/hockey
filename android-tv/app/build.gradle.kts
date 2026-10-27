@@ -13,8 +13,8 @@ android {
         applicationId = "online.hockeylive.tv"
         minSdk = 21
         targetSdk = 34
-        versionCode = 15
-        versionName = "1.14-ace-test"
+        versionCode = 16
+        versionName = "1.15"
     }
 
     signingConfigs {
