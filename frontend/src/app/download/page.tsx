@@ -7,9 +7,6 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 // Основная ссылка — сервер (тот же файл, что OTA-обновление в приложении):
 // всегда последняя версия после каждого деплоя бэкенда.
 const APK_URL = `${API_URL}/api/app/apk`;
-// Запасная ссылка — GitHub Releases (на случай, если сервер недоступен).
-const FALLBACK_APK_URL =
-  "https://github.com/Alex071199/hockey/releases/latest/download/HockeyLiveTV.apk";
 
 const steps = [
   {
@@ -76,14 +73,6 @@ export default function DownloadPage() {
             {version ? `Текущая версия: ${version} · ` : ""}
             ссылка всегда ведёт на последнюю версию
           </p>
-          <a
-            href={FALLBACK_APK_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block text-hockey-text-muted text-xs sm:text-sm mt-2 underline hover:text-hockey-text-secondary transition-colors"
-          >
-            Скачать с зеркала (GitHub), если сервер недоступен
-          </a>
         </div>
 
         <div className="text-left bg-hockey-card border border-hockey-border rounded-2xl p-6 sm:p-8 mb-8">
