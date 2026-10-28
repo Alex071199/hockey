@@ -12,6 +12,7 @@
 
 import asyncio
 import json
+import logging
 import re
 import ssl
 import time
@@ -24,6 +25,8 @@ from fastapi.responses import Response
 
 from app.config import settings
 from app.scraper.team_names import canonical_team_name
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/broadcast", tags=["broadcast"])
 
@@ -55,6 +58,51 @@ _live_cache: tuple[float, list] | None = None
 # новый TCP+TLS handshake — на старте трансляции (4-6 параллельных
 # сегментов) это давало заметные заикания.
 _up_client: httpx.AsyncClient | None = None
+
+# --- PRIME: обход geo-блока 1win через пул обычных HTTP-прокси -------------
+# 1win режет IP дата-центров (Alwaysdata, Cloudflare) — страница плеера
+# отдаёт «Извините, недоступно в вашем регионе». Подпись HLS привязана к
+# IP, поэтому на матч закрепляется ОДИН прокси и держится всю трансляцию.
+_prime_proxies: list[str] = [
+    p.strip() for p in settings.PRIME_PROXIES.split(",") if p.strip()
+]
+_proxy_clients: dict[str, httpx.AsyncClient] = {}
+_match_proxy: dict[int, str] = {}   # win_id -> закреплённый прокси
+_proxy_rr = 0                       # round-robin по пулу
+
+
+def _proxy_client(proxy: str) -> httpx.AsyncClient:
+    c = _proxy_clients.get(proxy)
+    if c is None or c.is_closed:
+        c = httpx.AsyncClient(
+            proxy=proxy,
+            timeout=25,
+            follow_redirects=True,
+            limits=httpx.Limits(
+                max_keepalive_connections=4,
+                keepalive_expiry=30,
+                max_connections=8,
+            ),
+        )
+        _proxy_clients[proxy] = c
+    return c
+
+
+def _pick_proxy(win_id: int, avoid: set[str] | None = None) -> str | None:
+    """Липкий прокси на матч: подпись HLS нельзя менять посреди эфира."""
+    global _proxy_rr
+    if not _prime_proxies:
+        return None
+    cur = _match_proxy.get(win_id)
+    if cur and cur in _prime_proxies and not (avoid and cur in avoid):
+        return cur
+    for _ in range(len(_prime_proxies)):
+        cand = _prime_proxies[_proxy_rr % len(_prime_proxies)]
+        _proxy_rr += 1
+        if not (avoid and cand in avoid):
+            _match_proxy[win_id] = cand
+            return cand
+    return _prime_proxies[0]
 
 
 def _shared_client() -> httpx.AsyncClient:
@@ -134,30 +182,43 @@ async def _push_broadcast_url(match_id: int) -> str | None:
     return None
 
 
-async def _fetch_player_source(broadcast_url: str) -> tuple[str | None, str | None, int, int, str]:
+async def _fetch_player_source(
+    broadcast_url: str, proxy: str | None = None
+) -> tuple[str | None, str | None, int, int, str]:
     """HTML плеера 1win: (m3u8, embed, status, length, preview).
 
     Большинство трансляций отдаёт прямой m3u8 (только при Referer из белого
     списка 1win); часть — iframe внутри себя (Twitch и другие плееры).
     Если задан PROXY_URL — запрос идёт через Cloudflare Worker (EU),
     иначе US IP получает заглушку с таймером вместо плеера.
+    `proxy` — обычный HTTP-прокси (пул PRIME_PROXIES): 1win режет IP
+    дата-центров, HLS-подпись при этом привязана к IP прокси.
     """
     try:
-        proxied = _proxy_target(broadcast_url)
-        if proxied:
-            # РФ-прокси (хостинг): сам ставит заголовки и ходит с РФ IP
-            r = await _shared_client().get(proxied, headers=_PROXY_REQ_HEADERS)
+        if proxy:
+            client = _proxy_client(proxy)
         else:
-            headers = {
-                "User-Agent": WIN_UA,
-                "Referer": WIN_ORIGIN + "/",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Sec-Fetch-Dest": "iframe",
-                "Sec-Fetch-Mode": "navigate",
-                "Sec-Fetch-Site": "cross-site",
-                "Upgrade-Insecure-Requests": "1",
-            }
-            r = await _shared_client().get(broadcast_url, headers=headers)
+            client = _shared_client()
+        try:
+            proxied = _proxy_target(broadcast_url)
+            if proxied:
+                # РФ-прокси (хостинг): сам ставит заголовки и ходит с РФ IP
+                r = await _shared_client().get(proxied, headers=_PROXY_REQ_HEADERS)
+            else:
+                headers = {
+                    "User-Agent": WIN_UA,
+                    "Referer": WIN_ORIGIN + "/",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Sec-Fetch-Dest": "iframe",
+                    "Sec-Fetch-Mode": "navigate",
+                    "Sec-Fetch-Site": "cross-site",
+                    "Upgrade-Insecure-Requests": "1",
+                }
+                r = await client.get(broadcast_url, headers=headers)
+        except httpx.HTTPError as e:
+            if proxy:
+                logger.warning("PRIME proxy %s failed for player: %s", proxy, e)
+            raise
     except Exception:
         return None, None, 0, 0, ""
     text = r.text
@@ -193,30 +254,47 @@ async def _get_state(win_id: int, force: bool = False) -> dict | None:
                 return cached[1]
         broadcast_url = await _push_broadcast_url(win_id)
         if broadcast_url:
-            m3u8, embed, _status, _len, _prev = await _fetch_player_source(broadcast_url)
-            if m3u8 or embed:
-                st: dict = {"broadcast": broadcast_url, "got_at": now}
-                if m3u8:
-                    st["m3u8"] = m3u8
-                else:
-                    st["embed"] = embed
-                _state[win_id] = (now, st)
-                return st
+            # прокси «липкий» на матч, но если мёртвый — пробуем следующий
+            tried: set[str] = set()
+            for _ in range(len(_prime_proxies) or 1):
+                proxy = _pick_proxy(win_id, tried)
+                if proxy:
+                    tried.add(proxy)
+                m3u8, embed, _status, _len, _prev = await _fetch_player_source(
+                    broadcast_url, proxy
+                )
+                if m3u8 or embed:
+                    st: dict = {"broadcast": broadcast_url, "got_at": now}
+                    if proxy:
+                        st["proxy"] = proxy
+                    if m3u8:
+                        st["m3u8"] = m3u8
+                    else:
+                        st["embed"] = embed
+                    _state[win_id] = (now, st)
+                    return st
+                # прокси не смог вытянуть плеер — сбрасываем липкость
+                _match_proxy.pop(win_id, None)
         # источник молчит — держимся за недавнее состояние, если оно есть
         if cached and now - cached[0] < STATE_TTL * 4:
             return cached[1]
         return None
 
 
-async def _upstream_get(url: str) -> tuple[bytes, int]:
+async def _upstream_get(url: str, proxy: str | None = None) -> tuple[bytes, int]:
     try:
+        client = _proxy_client(proxy) if proxy else _shared_client()
         proxied = _proxy_target(url)
         if proxied:
             r = await _shared_client().get(proxied, headers=_PROXY_REQ_HEADERS)
         else:
             headers = {"User-Agent": WIN_UA, "Accept": "*/*", "Referer": WIN_ORIGIN + "/"}
-            r = await _shared_client().get(url, headers=headers)
+            r = await client.get(url, headers=headers)
         return r.content, r.status_code
+    except httpx.HTTPError as e:
+        if proxy:
+            logger.warning("PRIME proxy %s failed for upstream: %s", proxy, e)
+        return b"", 0
     except Exception:
         return b"", 0
 
@@ -288,11 +366,12 @@ def _is_manifest(url: str) -> bool:
 
 
 async def _fetch_manifest(win_id: int, st: dict) -> tuple[bytes, int]:
-    content, status = await _upstream_get(st["m3u8"])
+    proxy = st.get("proxy")
+    content, status = await _upstream_get(st["m3u8"], proxy)
     if status != 200 or not content or _is_placeholder(content):
         st2 = await _get_state(win_id, force=True)
         if st2 and st2.get("m3u8") and st2["m3u8"] != st["m3u8"]:
-            content, status = await _upstream_get(st2["m3u8"])
+            content, status = await _upstream_get(st2["m3u8"], st2.get("proxy"))
             st = st2
     return content, status
 
@@ -548,6 +627,10 @@ async def stream_part(win_id: int, u: str = Query(..., description="Абсолю
     if not u.startswith("http"):
         raise HTTPException(400, "Bad url")
 
+    # HLS-подпись привязана к IP прокси — весь матч должен идти через один
+    cached_st = (_state.get(win_id) or (0, {}))[1]
+    proxy = cached_st.get("proxy")
+
     # подпись старше SIGN_TTL — подменяем ДО запроса: origin отдаёт
     # протухшие URL и с 200 (заглушка placeholders/timeout.ts), поэтому
     # старый фоллбэк «только при не-200» никогда не срабатывал
@@ -555,8 +638,9 @@ async def stream_part(win_id: int, u: str = Query(..., description="Абсолю
         st = await _get_state(win_id)
         if st and st.get("m3u8"):
             u = _rekey(u, st["m3u8"])
+            proxy = st.get("proxy", proxy)
 
-    content, status = await _upstream_get(u)
+    content, status = await _upstream_get(u, proxy)
 
     # протухшая сессия вернула заглушку — перечитываем состояние
     # принудительно и пробуем ещё раз со свежей подписью
@@ -564,13 +648,15 @@ async def stream_part(win_id: int, u: str = Query(..., description="Абсолю
         st = await _get_state(win_id, force=True)
         if st and st.get("m3u8"):
             u = _rekey(u, st["m3u8"])
-            content, status = await _upstream_get(u)
+            proxy = st.get("proxy", proxy)
+            content, status = await _upstream_get(u, proxy)
 
     if status not in (200, 206) or not content:
         # подпись протухла — берём свежий m3u8 и подменяем параметры подписи
         st = await _get_state(win_id, force=True)
         if st and st.get("m3u8"):
-            content, status = await _upstream_get(_rekey(u, st["m3u8"]))
+            proxy = st.get("proxy", proxy)
+            content, status = await _upstream_get(_rekey(u, st["m3u8"]), proxy)
     if status not in (200, 206) or not content:
         raise HTTPException(502, "Upstream недоступен")
 

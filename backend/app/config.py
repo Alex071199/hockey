@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     YOOMONEY_WALLET: str = ""
     # Cloudflare Worker прокси (EU-регион) для обхода geo-блока 1win player
     PROXY_URL: str = ""
+    # Пул обычных HTTP-прокси (через запятую, http://ip:port) для PRIME:
+    # 1win режет IP дата-центров (Alwaysdata, Cloudflare) — «недоступно
+    # в вашем регионе». Подпись HLS привязана к IP, поэтому для каждого
+    # матча закрепляется ОДИН прокси на всю цепочку (плеер+плейлист+сегменты).
+    PRIME_PROXIES: str = ""
 
     model_config = {"env_file": ".env"}
 
@@ -60,6 +65,7 @@ def _squash_ws(value: str) -> str:
 settings.TURSO_AUTH_TOKEN = _squash_ws(settings.TURSO_AUTH_TOKEN)
 settings.TURSO_DATABASE_URL = _squash_ws(settings.TURSO_DATABASE_URL)
 settings.PROXY_URL = (settings.PROXY_URL or "").strip()
+settings.PRIME_PROXIES = (settings.PRIME_PROXIES or "").strip()
 
 
 def _resolve_database_url() -> str:

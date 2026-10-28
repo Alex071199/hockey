@@ -1,11 +1,11 @@
-// Cloudflare Worker: прокси для player 1win (обход geo-блока с US IP)
-// Бэкенд на Render (US) → Worker (EU) → video-translations.top-parser.com
+// Cloudflare Worker: прокси для player 1win (обход geo-блока).
+// Бэкенд (Alwaysdata, FR) → Worker (CF edge) → video-translations.top-parser.com.
+// Важно: отдаём байты как есть (м3u8 и HLS-сегменты — бинарные, .text() их ломает).
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // CORS заголовки
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, OPTIONS',
@@ -16,7 +16,6 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
 
-    // Принимаем GET /?url=<encoded_url>
     const targetUrl = url.searchParams.get('url');
     if (!targetUrl) {
       return new Response(JSON.stringify({ error: 'Missing url parameter' }), {
@@ -26,28 +25,30 @@ export default {
     }
 
     try {
-      // Заголовки имитируют браузер из РФ (Referer 1win)
+      // Заголовки имитируют браузер (Referer 1win — в белом списке)
       const headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         'Referer': 'https://1wixpv.life/',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept': '*/*',
         'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Sec-Fetch-Dest': 'iframe',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'cross-site',
-        'Upgrade-Insecure-Requests': '1',
       };
+      // пробрасываем Range — для дозагрузки сегментов плеером
+      const range = request.headers.get('Range');
+      if (range) headers['Range'] = range;
 
       const response = await fetch(targetUrl, { headers });
-      const html = await response.text();
+      const buf = await response.arrayBuffer();
 
-      return new Response(html, {
-        status: response.status,
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'text/html; charset=utf-8',
-        },
-      });
+      const out = {
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': response.headers.get('Content-Type') || 'application/octet-stream',
+      };
+      const cr = response.headers.get('Content-Range');
+      if (cr) out['Content-Range'] = cr;
+      const len = response.headers.get('Content-Length');
+      if (len) out['Content-Length'] = len;
+
+      return new Response(buf, { status: response.status, headers: out });
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message }), {
         status: 502,
