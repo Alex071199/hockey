@@ -101,7 +101,8 @@ app.include_router(tv_auth_router)
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok"}
+    from app.api.broadcast import _prime_proxies
+    return {"status": "ok", "prime_proxies": len(_prime_proxies)}
 
 
 @app.post("/api/admin/scrape")
