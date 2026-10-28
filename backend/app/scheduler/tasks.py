@@ -1217,18 +1217,37 @@ async def _prime_probe(proxy: str, player_url: str) -> bool:
     """True, если через прокси живой плеер 1win (не geo-заглушка)."""
     import httpx
     from app.api.broadcast import WIN_UA
-    try:
-        async with httpx.AsyncClient(proxy=proxy, timeout=10,
-                                     follow_redirects=True) as c:
-            r = await c.get(player_url, headers={
-                "User-Agent": WIN_UA,
-                "Referer": "https://1wixpv.life/",
-                "Accept": "text/html,*/*",
-            })
-        return r.status_code == 200 and "регион" not in r.text \
-            and ".m3u8" in r.text
-    except Exception:
-        return False
+    # 2 попытки: бесплатные прокси флапают — один таймаут не повод выкидывать
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(proxy=proxy, timeout=10,
+                                         follow_redirects=True) as c:
+                r = await c.get(player_url, headers={
+                    "User-Agent": WIN_UA,
+                    "Referer": "https://1wixpv.life/",
+                    "Accept": "text/html,*/*",
+                })
+            if r.status_code == 200 and "регион" not in r.text \
+                    and ".m3u8" in r.text:
+                return True
+        except Exception:
+            pass
+        if attempt == 0:
+            await asyncio.sleep(2)
+    return False
+
+
+# прокси, которые когда-либо проходили проверку: их пробуем первыми
+# при доборе — кэш переживает смерть прокси и возвращает флапающих
+_prime_seen: list[str] = []
+_PRIME_SEEN_CAP = 20
+
+
+def _note_seen(*proxies: str) -> None:
+    for p in proxies:
+        if p and p not in _prime_seen:
+            _prime_seen.append(p)
+    del _prime_seen[:-_PRIME_SEEN_CAP]
 
 
 async def _prime_candidates(exclude: set[str]) -> list[str]:
@@ -1275,6 +1294,8 @@ async def refresh_prime_proxies() -> None:
     dead: list[str] = []
     for p in list(_prime_proxies):
         (healthy if await _prime_probe(p, player_url) else dead).append(p)
+    if healthy:
+        _note_seen(*healthy)
     if dead:
         for p in dead:
             client = _proxy_clients.pop(p, None)
@@ -1290,8 +1311,12 @@ async def refresh_prime_proxies() -> None:
     if len(healthy) >= PRIME_POOL_SIZE:
         return
 
-    # 3) добираем живых из публичных списков
-    candidates = await _prime_candidates(set(_prime_proxies))
+    # 3) добираем: сначала те, что уже работали (кэш флапающих),
+    # потом свежие из публичных списков
+    exclude = set(_prime_proxies)
+    retried = [p for p in reversed(_prime_seen) if p not in exclude]
+    fresh = await _prime_candidates(exclude | set(retried))
+    candidates = (retried + fresh)[:PRIME_SCAN_CAP]
     if not candidates:
         if len(healthy) < PRIME_POOL_MIN:
             logger.warning("PRIME proxies: кандидатов нет, пул %d", len(_prime_proxies))
@@ -1305,13 +1330,15 @@ async def refresh_prime_proxies() -> None:
 
     found = [p for p in await asyncio.gather(*(probe(p) for p in candidates)) if p]
     if found:
+        _note_seen(*found)
         _prime_proxies[:] = (healthy + found)[:PRIME_POOL_SIZE]
         logger.info(
             "PRIME proxies: добавлено %s, пул %d (%s)",
             found, len(_prime_proxies), _prime_proxies,
         )
     elif len(healthy) < PRIME_POOL_MIN:
-        logger.warning("PRIME proxies: живых только %d, кандидаты не прошли", len(healthy))
+        logger.warning("PRIME proxies: живых только %d из %d кандидатов",
+                       len(healthy), len(candidates))
 
 
 async def refresh_live_stream_urls() -> None:
