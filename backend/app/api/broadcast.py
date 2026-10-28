@@ -369,8 +369,13 @@ async def _fetch_manifest(win_id: int, st: dict) -> tuple[bytes, int]:
     proxy = st.get("proxy")
     content, status = await _upstream_get(st["m3u8"], proxy)
     if status != 200 or not content or _is_placeholder(content):
+        # прокси умер / подпись протухла: сбрасываем кэш, иначе
+        # force-обновление вернёт ТО ЖЕ состояние с мёртвым прокси
+        # (защита «только что обновлялись» — возраст < 15 сек)
+        _state.pop(win_id, None)
+        _match_proxy.pop(win_id, None)
         st2 = await _get_state(win_id, force=True)
-        if st2 and st2.get("m3u8") and st2["m3u8"] != st["m3u8"]:
+        if st2 and st2.get("m3u8"):
             content, status = await _upstream_get(st2["m3u8"], st2.get("proxy"))
             st = st2
     return content, status
@@ -614,9 +619,13 @@ async def stream_manifest(win_id: int):
     content, status = await _fetch_manifest(win_id, st)
     if status != 200 or not content or _is_placeholder(content):
         raise HTTPException(502, "Источник недоступен")
+    # _fetch_manifest мог пересобрать состояние (другой прокси/edge) —
+    # базовый URL для перезаписи относительных ссылок берём свежий
+    fresh = (_state.get(win_id) or (0, st))[1]
+    base = fresh.get("m3u8") or st["m3u8"]
     text = content.decode("utf-8", errors="replace")
     return Response(
-        content=_rewrite_playlist(text, st["m3u8"], win_id),
+        content=_rewrite_playlist(text, base, win_id),
         media_type="application/vnd.apple.mpegurl",
         headers=MANIFEST_HEADERS,
     )

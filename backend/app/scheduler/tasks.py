@@ -1195,6 +1195,122 @@ async def warm_prime_states() -> None:
             logger.warning("PRIME warmup %s failed: %s", win_id, e)
 
 
+# --- PRIME: поддержание живости бесплатного прокси-пула ----------------------
+# Бесплатные прокси живут от минут до часов: без пересборки пул вымирает
+# посреди эфира, и /part отвечает 502 «Upstream недоступен». Джоба
+# health-читает текущий пул страницей плеера 1win (m3u8 вместо geo-заглушки)
+# и добирает живых из публичных списков. Список _prime_proxies мутируется
+# на месте — закреплённый у матчей прокси остаётся, пока жив.
+PRIME_PROXY_LISTS = [
+    "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/all/data.txt",
+    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+    "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http"
+    "&timeout=8000&country=RU,BY,KZ&ssl=all",
+]
+PRIME_POOL_MIN = 3       # меньше живых — добираем сканом
+PRIME_POOL_SIZE = 6      # целевой размер пула
+PRIME_SCAN_CAP = 150     # максимум кандидатов на прогон (защита от долбёжки)
+
+
+async def _prime_probe(proxy: str, player_url: str) -> bool:
+    """True, если через прокси живой плеер 1win (не geo-заглушка)."""
+    import httpx
+    from app.api.broadcast import WIN_UA
+    try:
+        async with httpx.AsyncClient(proxy=proxy, timeout=10,
+                                     follow_redirects=True) as c:
+            r = await c.get(player_url, headers={
+                "User-Agent": WIN_UA,
+                "Referer": "https://1wixpv.life/",
+                "Accept": "text/html,*/*",
+            })
+        return r.status_code == 200 and "регион" not in r.text \
+            and ".m3u8" in r.text
+    except Exception:
+        return False
+
+
+async def _prime_candidates(exclude: set[str]) -> list[str]:
+    """Свежие кандидаты из публичных списков (по одному порту на IP)."""
+    import httpx
+    out: dict[str, str] = {}
+    async with httpx.AsyncClient(timeout=20) as c:
+        for u in PRIME_PROXY_LISTS:
+            try:
+                r = await c.get(u)
+            except Exception:
+                continue
+            for line in r.text.splitlines():
+                line = line.split("#")[0].strip()
+                m = re.match(r"^(\d{1,3}(?:\.\d{1,3}){3}:\d{2,5})$", line)
+                if m and m.group(1) not in exclude:
+                    out.setdefault(m.group(1).split(":")[0], m.group(1))
+    return list(out.values())[:PRIME_SCAN_CAP]
+
+
+async def refresh_prime_proxies() -> None:
+    """Health-читает пул PRIME-прокси и заменяет мёртвые живыми."""
+    from app.api.broadcast import (
+        _prime_proxies, _proxy_clients, _broadcast_urls,
+    )
+
+    if not _prime_proxies:
+        return  # PRIME_PROXIES не задан — поддерживать нечего
+
+    # свежий URL плеера: geo-блок и живость видны только на нём
+    try:
+        line = await fetch_hockey_line()
+        live = [i["id"] for i in line if i.get("serviceV2") == "live"]
+        with_bc = await _broadcast_urls(live[:20]) if live else {}
+    except Exception as e:
+        logger.warning("PRIME proxy refresh: line failed: %s", e)
+        return
+    player_url = next(iter(with_bc.values()), None)
+    if not player_url:
+        return  # live-матчей нет — проверять нечем
+
+    # 1) health-чек текущего пула
+    healthy: list[str] = []
+    dead: list[str] = []
+    for p in list(_prime_proxies):
+        (healthy if await _prime_probe(p, player_url) else dead).append(p)
+    if dead:
+        for p in dead:
+            client = _proxy_clients.pop(p, None)
+            if client is not None and not client.is_closed:
+                try:
+                    await client.aclose()
+                except Exception:
+                    pass
+        _prime_proxies[:] = healthy
+        logger.info("PRIME proxies: умерли %s, в пуле %d", dead, len(healthy))
+
+    # 2) пула хватает — выходим
+    if len(healthy) >= PRIME_POOL_MIN:
+        return
+
+    # 3) добираем живых из публичных списков
+    candidates = await _prime_candidates(set(_prime_proxies))
+    if not candidates:
+        logger.warning("PRIME proxies: кандидатов нет, пул %d", len(_prime_proxies))
+        return
+
+    sem = asyncio.Semaphore(15)
+
+    async def probe(p: str) -> str | None:
+        async with sem:
+            return p if await _prime_probe(p, player_url) else None
+
+    found = [p for p in await asyncio.gather(*(probe(p) for p in candidates)) if p]
+    if found:
+        _prime_proxies[:] = (healthy + found)[:PRIME_POOL_SIZE]
+        logger.info(
+            "PRIME proxies: добавлено %s, пул %d (%s)",
+            found, len(_prime_proxies), _prime_proxies,
+        )
+
+
 async def refresh_live_stream_urls() -> None:
     """Подписанные sportplustv-ссылки (VHL, sportvideodata.com) протухают
     за считанные минуты — обновляем detail live-матчей каждые 60 секунд,
@@ -1780,6 +1896,15 @@ def setup_scheduler() -> None:
         id="warm_prime_states",
         replace_existing=True,
         max_instances=1,
+    )
+    scheduler.add_job(
+        refresh_prime_proxies,
+        "interval",
+        minutes=10,
+        id="refresh_prime_proxies",
+        replace_existing=True,
+        max_instances=1,
+        next_run_time=datetime.now() + timedelta(seconds=30),
     )
     scheduler.add_job(
         refresh_live_stream_urls,
