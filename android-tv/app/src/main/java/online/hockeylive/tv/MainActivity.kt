@@ -127,11 +127,30 @@ class MainActivity : ComponentActivity() {
             }
 
             LaunchedEffect(Unit) {
-                UpdateChecker.check(AppSettings.serverUrl(context)) { info ->
-                    val currentCode = BuildConfig.VERSION_CODE
-                    if (info != null && info.version_code > currentCode && info.apk_url != null) {
-                        updateInfo = info
+                while (true) {
+                    UpdateChecker.check(AppSettings.serverUrl(context)) { info ->
+                        if (info != null && info.version_code > BuildConfig.VERSION_CODE && info.apk_url != null) {
+                            val firstTime = updateInfo == null
+                            updateInfo = info
+                            // Фоновое скачивание: пока пользователь смотрит главное меню,
+                            // APK молча ложится в кэш. Останется одно нажатие «Установить».
+                            if (firstTime) {
+                                updateStatus =
+                                    if (UpdateChecker.isReady(context, info.apk_url))
+                                        "Установка доступна — нажмите «Обновить»"
+                                    else
+                                        "Скачиваю обновление в фоне…"
+                                UpdateChecker.prefetch(context, info.apk_url, { s -> updateStatus = s }) { ok ->
+                                    updateStatus =
+                                        if (ok) "Готово — нажмите «Обновить»"
+                                        else "Не удалось скачать, нажмите «Обновить»"
+                                }
+                            }
+                        }
                     }
+                    // Повторная проверка каждые 20 минут: обновление «прилетает»,
+                    // пока приложение открыто, а не только при перезапуске.
+                    delay(20 * 60 * 1000L)
                 }
             }
 
