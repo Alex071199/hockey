@@ -1286,14 +1286,15 @@ async def refresh_prime_proxies() -> None:
         _prime_proxies[:] = healthy
         logger.info("PRIME proxies: умерли %s, в пуле %d", dead, len(healthy))
 
-    # 2) пула хватает — выходим
-    if len(healthy) >= PRIME_POOL_MIN:
+    # 2) пул на целевом размере — выходим (иначе добираем)
+    if len(healthy) >= PRIME_POOL_SIZE:
         return
 
     # 3) добираем живых из публичных списков
     candidates = await _prime_candidates(set(_prime_proxies))
     if not candidates:
-        logger.warning("PRIME proxies: кандидатов нет, пул %d", len(_prime_proxies))
+        if len(healthy) < PRIME_POOL_MIN:
+            logger.warning("PRIME proxies: кандидатов нет, пул %d", len(_prime_proxies))
         return
 
     sem = asyncio.Semaphore(15)
@@ -1309,6 +1310,8 @@ async def refresh_prime_proxies() -> None:
             "PRIME proxies: добавлено %s, пул %d (%s)",
             found, len(_prime_proxies), _prime_proxies,
         )
+    elif len(healthy) < PRIME_POOL_MIN:
+        logger.warning("PRIME proxies: живых только %d, кандидаты не прошли", len(healthy))
 
 
 async def refresh_live_stream_urls() -> None:

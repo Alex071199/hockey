@@ -240,7 +240,9 @@ async def _fetch_player_m3u8(broadcast_url: str) -> tuple[str | None, int, int, 
     return m3u8, status, length, preview
 
 
-async def _get_state(win_id: int, force: bool = False) -> dict | None:
+async def _get_state(
+    win_id: int, force: bool = False, avoid: set[str] | None = None
+) -> dict | None:
     lock = _locks.setdefault(win_id, asyncio.Lock())
     async with lock:
         cached = _state.get(win_id)
@@ -249,13 +251,13 @@ async def _get_state(win_id: int, force: bool = False) -> dict | None:
             age = now - cached[0]
             if not force and age < STATE_TTL:
                 return cached[1]
-            if force and age < 15:
+            if force and age < 15 and not avoid:
                 # только что обновлялись — параллельные запросы не долбим WS
                 return cached[1]
         broadcast_url = await _push_broadcast_url(win_id)
         if broadcast_url:
             # прокси «липкий» на матч, но если мёртвый — пробуем следующий
-            tried: set[str] = set()
+            tried: set[str] = set(avoid or ())
             for _ in range(len(_prime_proxies) or 1):
                 proxy = _pick_proxy(win_id, tried)
                 if proxy:
@@ -661,15 +663,26 @@ async def stream_part(win_id: int, u: str = Query(..., description="Абсолю
             content, status = await _upstream_get(u, proxy)
 
     if status not in (200, 206) or not content:
-        # прокси умер (407/таймаут) или подпись протухла — сбрасываем
-        # состояние, чтобы следующий запрос собрал цепочку заново через
-        # живой прокси из пула
-        _state.pop(win_id, None)
-        _match_proxy.pop(win_id, None)
-        st = await _get_state(win_id, force=True)
-        if st and st.get("m3u8"):
-            proxy = st.get("proxy")
-            content, status = await _upstream_get(_rekey(u, st["m3u8"]), proxy)
+        # прокси умер (407/таймаут) или подпись протухла — пересобираем
+        # цепочку через следующий живой прокси из пула. Подпись HLS
+        # привязана к IP, поэтому каждый attempt — новый прокси + свежий m3u8.
+        avoid: set[str] = {proxy} if proxy else set()
+        for _ in range(min(4, max(len(_prime_proxies), 2))):
+            _state.pop(win_id, None)
+            _match_proxy.pop(win_id, None)
+            st = await _get_state(win_id, force=True, avoid=avoid)
+            if not st or not st.get("m3u8"):
+                break
+            nxt = st.get("proxy")
+            if nxt:
+                avoid.add(nxt)
+            content, status = await _upstream_get(_rekey(u, st["m3u8"]), nxt)
+            ok = status in (200, 206) and bool(content) and not (
+                _is_manifest(u) and _is_placeholder(content)
+            )
+            if ok:
+                proxy = nxt
+                break
     if status not in (200, 206) or not content:
         raise HTTPException(502, "Upstream недоступен")
 
