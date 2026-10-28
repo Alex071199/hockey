@@ -7,7 +7,7 @@ object AppSettings {
     private const val KEY_SERVER = "server_url"
     private const val KEY_AUTHORIZED = "tv_authorized"
     private const val KEY_DEVICE = "device_id"
-    const val DEFAULT_SERVER = "https://hockey-live-production-b0cc.up.railway.app"
+    const val DEFAULT_SERVER = "https://hockey-live.alwaysdata.net"
 
     /** Стабильный UUID устройства — для восстановления авторизации на сервере. */
     fun deviceId(context: Context): String {

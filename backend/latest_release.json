@@ -1,7 +1,7 @@
 {
-  "version": "1.15",
-  "version_code": 16,
-  "apk_url": "https://hockey-live-production-b0cc.up.railway.app/api/app/apk",
-  "notes": "Исправлена загрузка приложения, календарь без дублей и без лишних действий, источник AceStream подписан «Лучшее качество».",
+  "version": "1.16",
+  "version_code": 17,
+  "apk_url": "https://hockey-live.alwaysdata.net/api/app/apk",
+  "notes": "Сервер переехал на новый хостинг — приложение теперь работает стабильнее. Исправлена загрузка приложения, календарь без дублей и без лишних действий, источник AceStream подписан «Лучшее качество».",
   "force_update": true
 }
