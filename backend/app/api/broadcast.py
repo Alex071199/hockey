@@ -652,10 +652,14 @@ async def stream_part(win_id: int, u: str = Query(..., description="Абсолю
             content, status = await _upstream_get(u, proxy)
 
     if status not in (200, 206) or not content:
-        # подпись протухла — берём свежий m3u8 и подменяем параметры подписи
+        # прокси умер (407/таймаут) или подпись протухла — сбрасываем
+        # состояние, чтобы следующий запрос собрал цепочку заново через
+        # живой прокси из пула
+        _state.pop(win_id, None)
+        _match_proxy.pop(win_id, None)
         st = await _get_state(win_id, force=True)
         if st and st.get("m3u8"):
-            proxy = st.get("proxy", proxy)
+            proxy = st.get("proxy")
             content, status = await _upstream_get(_rekey(u, st["m3u8"]), proxy)
     if status not in (200, 206) or not content:
         raise HTTPException(502, "Upstream недоступен")
