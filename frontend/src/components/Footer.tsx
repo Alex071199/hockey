@@ -18,7 +18,7 @@ export default function Footer() {
               </span>
             </div>
             <p className="text-xs sm:text-sm text-hockey-text-secondary leading-relaxed">
-              Стриминговая платформа для просмотра хоккейных матчей КХЛ, ВХЛ и МХЛ в прямом эфире.
+              Стриминговая платформа для просмотра хоккейных матчей КХЛ, НХЛ, ВХЛ и МХЛ в прямом эфире.
             </p>
           </div>
 
@@ -74,7 +74,7 @@ export default function Footer() {
             с просьбой удалить его.
           </p>
           <p className="text-[10px] sm:text-xs text-hockey-text-muted leading-relaxed">
-            Все логотипы лиг <a href="https://www.khl.ru/" target="_blank" rel="noopener noreferrer" className="text-hockey-accent hover:text-hockey-accent-hover transition-colors">КХЛ</a>, <a href="https://mhl.khl.ru/" target="_blank" rel="noopener noreferrer" className="text-hockey-accent hover:text-hockey-accent-hover transition-colors">МХЛ</a> и <a href="https://www.vhlru.ru/" target="_blank" rel="noopener noreferrer" className="text-hockey-accent hover:text-hockey-accent-hover transition-colors">ВХЛ</a>, а также логотипы команд используются из сторонних сервисов и являются собственностью соответствующих организаций.
+            Все логотипы лиг <a href="https://www.khl.ru/" target="_blank" rel="noopener noreferrer" className="text-hockey-accent hover:text-hockey-accent-hover transition-colors">КХЛ</a>, <a href="https://www.nhl.com/" target="_blank" rel="noopener noreferrer" className="text-hockey-accent hover:text-hockey-accent-hover transition-colors">НХЛ</a>, <a href="https://mhl.khl.ru/" target="_blank" rel="noopener noreferrer" className="text-hockey-accent hover:text-hockey-accent-hover transition-colors">МХЛ</a> и <a href="https://www.vhlru.ru/" target="_blank" rel="noopener noreferrer" className="text-hockey-accent hover:text-hockey-accent-hover transition-colors">ВХЛ</a>, а также логотипы команд используются из сторонних сервисов и являются собственностью соответствующих организаций.
           </p>
           <p className="text-[10px] sm:text-xs text-hockey-text-muted leading-relaxed">
             Используя данный сервис, вы подтверждаете, что вам исполнилось 18 лет, и вы принимаете <Link href="/terms" className="text-hockey-accent hover:text-hockey-accent-hover transition-colors">условия использования</Link>.
