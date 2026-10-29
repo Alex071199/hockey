@@ -1227,8 +1227,10 @@ async def _prime_probe(proxy: str, player_url: str) -> bool:
                     "Referer": "https://1wixpv.life/",
                     "Accept": "text/html,*/*",
                 })
+            # здоровая страница: m3u8-ссылка ИЛИ iframe-плеер (Twitch и т.п.);
+            # geo-заглушка узнаётся по «регион» в тексте
             if r.status_code == 200 and "регион" not in r.text \
-                    and ".m3u8" in r.text:
+                    and (".m3u8" in r.text or "iframe" in r.text):
                 return True
         except Exception:
             pass
@@ -1274,8 +1276,11 @@ async def refresh_prime_proxies() -> None:
         _prime_proxies, _proxy_clients, _broadcast_urls,
     )
 
-    if not _prime_proxies:
-        return  # PRIME_PROXIES не задан — поддерживать нечего
+    # PRIME_PROXIES не задан в env — поддерживать нечего. Пул же мог
+    # вымереть целиком (бесплатные прокси умирают за минуты) — тогда
+    # восстанавливаем его сканом, а не выходим молча.
+    if not _prime_proxies and not settings.PRIME_PROXIES:
+        return
 
     # свежий URL плеера: geo-блок и живость видны только на нём
     try:
@@ -1289,11 +1294,18 @@ async def refresh_prime_proxies() -> None:
     if not player_url:
         return  # live-матчей нет — проверять нечем
 
-    # 1) health-чек текущего пула
-    healthy: list[str] = []
-    dead: list[str] = []
-    for p in list(_prime_proxies):
-        (healthy if await _prime_probe(p, player_url) else dead).append(p)
+    # 1) health-чек текущего пула (параллельно — последовательно до 3 мин)
+    pool = list(_prime_proxies)
+    sem_chk = asyncio.Semaphore(8)
+    chk: dict[str, bool] = {}
+
+    async def check(p: str) -> None:
+        async with sem_chk:
+            chk[p] = await _prime_probe(p, player_url)
+
+    await asyncio.gather(*(check(p) for p in pool))
+    healthy = [p for p in pool if chk.get(p)]
+    dead = [p for p in pool if not chk.get(p)]
     if healthy:
         _note_seen(*healthy)
     if dead:
