@@ -70,11 +70,14 @@ function sourcePriority(s: Stream) {
 }
 
 function sortStreams(list: Stream[]) {
+  // acestream-источники показываем только в ТВ-приложении (там есть
+  // свой плеер); в браузере они не воспроизводятся — скрываем
+  const visible = list.filter((s) => !isAceStream(s));
   // webplayer livetv с youtube-транспортом — это тот же embed ролика;
   // через наш прокси YouTube показывает Error 153, поэтому приводим
   // URL к прямому embed и схлопываем дубли по URL.
   const seen = new Set<string>();
-  return [...list]
+  return visible
     .map((s) => {
       let url = s.url;
       if (url.includes("webplayer") && url.includes("t=youtube")) {
