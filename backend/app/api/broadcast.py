@@ -317,6 +317,25 @@ def _rekey(url: str, fresh_m3u8: str) -> str:
     return urllib.parse.urlunparse(parsed._replace(query=query))
 
 
+def _retarget(url: str, fresh_m3u8: str) -> str:
+    """Смена прокси = новая сессия 1win: токен в ПУТИ URL (первый сегмент,
+    он же префикс имени файла) привязан к IP. При failover на другой прокси
+    подменяем и токен пути, и query-подпись (_rekey), иначе origin отдаёт
+    ошибку на старом токене с нового IP."""
+    fresh_p = urllib.parse.urlparse(fresh_m3u8)
+    old_p = urllib.parse.urlparse(url)
+    fresh_parts = fresh_p.path.strip("/").split("/")
+    old_parts = old_p.path.strip("/").split("/")
+    if (
+        len(fresh_parts) >= 2
+        and len(old_parts) >= 2
+        and fresh_parts[0] != old_parts[0]
+    ):
+        new_path = old_p.path.replace(old_parts[0], fresh_parts[0])
+        url = urllib.parse.urlunparse(old_p._replace(path=new_path))
+    return _rekey(url, fresh_m3u8)
+
+
 def _sign_age(url: str) -> float:
     """Возраст подписи (сек) по параметру timestamp; 0, если его нет."""
     q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
@@ -669,9 +688,9 @@ async def stream_part(win_id: int, u: str = Query(..., description="Абсолю
     if status not in (200, 206) or not content:
         # прокси умер (407/таймаут) или подпись протухла — пересобираем
         # цепочку через следующий живой прокси из пула. Подпись HLS
-        # привязана к IP, поэтому каждый attempt — новый прокси + свежий m3u8.
+        # привязана к IP: подменяем и токен пути, и query (_retarget).
         avoid: set[str] = {proxy} if proxy else set()
-        for _ in range(min(4, max(len(_prime_proxies), 2))):
+        for _ in range(min(3, max(len(_prime_proxies), 2))):
             _state.pop(win_id, None)
             _match_proxy.pop(win_id, None)
             st = await _get_state(win_id, force=True, avoid=avoid)
@@ -680,12 +699,13 @@ async def stream_part(win_id: int, u: str = Query(..., description="Абсолю
             nxt = st.get("proxy")
             if nxt:
                 avoid.add(nxt)
-            content, status = await _upstream_get(_rekey(u, st["m3u8"]), nxt)
+            content, status = await _upstream_get(_retarget(u, st["m3u8"]), nxt)
             ok = status in (200, 206) and bool(content) and not (
                 _is_manifest(u) and _is_placeholder(content)
             )
             if ok:
                 proxy = nxt
+                u = _retarget(u, st["m3u8"])
                 break
     if status not in (200, 206) or not content:
         raise HTTPException(502, "Upstream недоступен")
