@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -1207,18 +1208,24 @@ PRIME_PROXY_LISTS = [
     "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
     "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http"
     "&timeout=8000&country=RU,BY,KZ&ssl=all",
+    "https://raw.githubusercontent.com/roosterkid/openproxylist/main/PROXY_HTTP.txt",
+    "https://raw.githubusercontent.com/akhwuse/Proxy-Lists/main/HTTP.txt",
 ]
 PRIME_POOL_MIN = 3       # меньше живых — добираем сканом
 PRIME_POOL_SIZE = 8      # целевой размер пула (бесплатные умирают за минуты)
-PRIME_SCAN_CAP = 100     # максимум кандидатов на прогон (защита от долбёжки)
+PRIME_SCAN_CAP = 200     # максимум кандидатов на прогон (перемешаны)
 
 
-async def _prime_probe(proxy: str, player_url: str) -> bool:
-    """True, если через прокси живой плеер 1win (не geo-заглушка)."""
+async def _prime_probe(proxy: str, player_url: str, tries: int = 2) -> bool:
+    """True, если через прокси живой плеер 1win (не geo-заглушка).
+
+    tries=2 для членов пула: бесплатные прокси флапают — один таймаут
+    не повод выкидывать. Свежие кандидаты проверяем одной попыткой,
+    иначе скан 200 адресов не укладывается в интервал джобы.
+    """
     import httpx
     from app.api.broadcast import WIN_UA
-    # 2 попытки: бесплатные прокси флапают — один таймаут не повод выкидывать
-    for attempt in range(2):
+    for attempt in range(tries):
         try:
             async with httpx.AsyncClient(proxy=proxy, timeout=10,
                                          follow_redirects=True) as c:
@@ -1253,7 +1260,11 @@ def _note_seen(*proxies: str) -> None:
 
 
 async def _prime_candidates(exclude: set[str]) -> list[str]:
-    """Свежие кандидаты из публичных списков (по одному порту на IP)."""
+    """Свежие кандидаты из публичных списков (по одному порту на IP).
+
+    Перемешиваем: списки отсортированы по IP, и без shuffle первые N
+    кандидатов почти всегда из одного мёртвого подсета.
+    """
     import httpx
     out: dict[str, str] = {}
     async with httpx.AsyncClient(timeout=20) as c:
@@ -1267,7 +1278,9 @@ async def _prime_candidates(exclude: set[str]) -> list[str]:
                 m = re.match(r"^(\d{1,3}(?:\.\d{1,3}){3}:\d{2,5})$", line)
                 if m and m.group(1) not in exclude:
                     out.setdefault(m.group(1).split(":")[0], m.group(1))
-    return list(out.values())[:PRIME_SCAN_CAP]
+    pool = list(out.values())
+    random.shuffle(pool)
+    return pool[:PRIME_SCAN_CAP]
 
 
 async def refresh_prime_proxies() -> None:
@@ -1338,7 +1351,7 @@ async def refresh_prime_proxies() -> None:
 
     async def probe(p: str) -> str | None:
         async with sem:
-            return p if await _prime_probe(p, player_url) else None
+            return p if await _prime_probe(p, player_url, tries=1) else None
 
     found = [p for p in await asyncio.gather(*(probe(p) for p in candidates)) if p]
     if found:
