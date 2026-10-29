@@ -763,6 +763,7 @@ fun HomeScreen(
                 matches = calendarMatches,
                 loading = calendarLoading,
                 showScores = showScores,
+                onMatchClick = onMatchClick,
             )
             "table" -> StandingsSection(
                 data = standings,
@@ -818,6 +819,7 @@ fun CalendarSection(
     matches: List<Match>,
     loading: Boolean,
     showScores: Boolean,
+    onMatchClick: (Match) -> Unit,
 ) {
     if (loading) {
         Text(
@@ -859,7 +861,7 @@ fun CalendarSection(
         for ((date, list) in grouped) {
             item(key = "day_$date") { CalendarDayHeader(date, today) }
             items(list, key = { "${it.league}|${it.matchUid ?: it.id}|${it.datetimeUtc}" }) { m ->
-                CalendarRow(match = m, showScores = showScores)
+                CalendarRow(match = m, showScores = showScores, onClick = { onMatchClick(m) })
             }
         }
     }
@@ -889,21 +891,30 @@ fun CalendarDayHeader(date: java.time.LocalDate, today: java.time.LocalDate) {
     )
 }
 
+@OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-fun CalendarRow(match: Match, showScores: Boolean) {
+fun CalendarRow(match: Match, showScores: Boolean, onClick: () -> Unit) {
     val time = runCatching {
         java.time.Instant.parse(match.datetimeUtc)
             .atZone(java.time.ZoneId.systemDefault())
             .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
     }.getOrDefault("")
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Theme.card)
-            .padding(horizontal = 32.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    // Surface(onClick) даёт фокус для D-pad: без фокусируемого элемента
+    // LazyColumn не прокручивается пультом — строки «залипают»
+    Surface(
+        onClick = onClick,
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = Theme.card,
+            focusedContainerColor = Theme.cardHover,
+        ),
     ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 text = time,
                 color = Theme.text,
@@ -937,6 +948,7 @@ fun CalendarRow(match: Match, showScores: Boolean) {
             )
             Spacer(Modifier.width(10.dp))
             TeamLogo(match.teamAway, size = 34.dp)
+        }
     }
 }
 
