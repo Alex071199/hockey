@@ -76,7 +76,11 @@ def _proxy_client(proxy: str) -> httpx.AsyncClient:
     if c is None or c.is_closed:
         c = httpx.AsyncClient(
             proxy=proxy,
-            timeout=25,
+            # Бесплатные прокси медленные: сегмент 300-500 КБ может идти
+            # десятки секунд, а первый байт — только после буферизации
+            # прокси. read=45 даёт запас; connect держим компактным,
+            # чтобы мёртвые адреса отсеивались быстро.
+            timeout=httpx.Timeout(45.0, connect=20.0, read=45.0),
             follow_redirects=True,
             limits=httpx.Limits(
                 max_keepalive_connections=4,
