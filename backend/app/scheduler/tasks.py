@@ -1277,7 +1277,9 @@ async def _prime_candidates(exclude: set[str]) -> list[str]:
                 line = line.split("#")[0].strip()
                 m = re.match(r"^(\d{1,3}(?:\.\d{1,3}){3}:\d{2,5})$", line)
                 if m and m.group(1) not in exclude:
-                    out.setdefault(m.group(1).split(":")[0], m.group(1))
+                    # Схема обязательна: httpx падает на "ip:port" без неё,
+                    # а exclude сравнивается с пулом (там "http://ip:port")
+                    out.setdefault(m.group(1).split(":")[0], "http://" + m.group(1))
     pool = list(out.values())
     random.shuffle(pool)
     return pool[:PRIME_SCAN_CAP]
