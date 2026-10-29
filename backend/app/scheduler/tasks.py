@@ -1209,8 +1209,8 @@ PRIME_PROXY_LISTS = [
     "&timeout=8000&country=RU,BY,KZ&ssl=all",
 ]
 PRIME_POOL_MIN = 3       # меньше живых — добираем сканом
-PRIME_POOL_SIZE = 6      # целевой размер пула
-PRIME_SCAN_CAP = 150     # максимум кандидатов на прогон (защита от долбёжки)
+PRIME_POOL_SIZE = 8      # целевой размер пула (бесплатные умирают за минуты)
+PRIME_SCAN_CAP = 100     # максимум кандидатов на прогон (защита от долбёжки)
 
 
 async def _prime_probe(proxy: str, player_url: str) -> bool:
@@ -1930,7 +1930,7 @@ def setup_scheduler() -> None:
     scheduler.add_job(
         refresh_prime_proxies,
         "interval",
-        minutes=10,
+        minutes=3,
         id="refresh_prime_proxies",
         replace_existing=True,
         max_instances=1,
