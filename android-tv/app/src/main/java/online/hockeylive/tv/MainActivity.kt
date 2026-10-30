@@ -126,31 +126,32 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            // Обновления проверяем ОДИН раз за запуск. Периодическая проверка
+            // каждые 20 минут поднимала диалог заново после «Позже», и на ТВ это
+            // выглядело как вечное обновление.
             LaunchedEffect(Unit) {
-                while (true) {
+                try {
                     UpdateChecker.check(AppSettings.serverUrl(context)) { info ->
-                        if (info != null && info.version_code > BuildConfig.VERSION_CODE && info.apk_url != null) {
-                            val firstTime = updateInfo == null
-                            updateInfo = info
-                            // Фоновое скачивание: пока пользователь смотрит главное меню,
-                            // APK молча ложится в кэш. Останется одно нажатие «Установить».
-                            if (firstTime) {
-                                updateStatus =
-                                    if (UpdateChecker.isReady(context, info.apk_url))
-                                        "Установка доступна — нажмите «Обновить»"
-                                    else
-                                        "Скачиваю обновление в фоне…"
-                                UpdateChecker.prefetch(context, info.apk_url, { s -> updateStatus = s }) { ok ->
-                                    updateStatus =
-                                        if (ok) "Готово — нажмите «Обновить»"
-                                        else "Не удалось скачать, нажмите «Обновить»"
-                                }
-                            }
+                        val apkUrl = info?.apk_url ?: return@check
+                        // Сравниваем с реально установленным пакетом, а не с константой сборки.
+                        if (info.version_code <= UpdateChecker.currentVersionCode(context)) return@check
+                        // Для этой версии уже отказались — не беспокоим до следующего релиза.
+                        if (AppSettings.updateDismissedCode(context) >= info.version_code) return@check
+
+                        updateInfo = info
+                        // APK молча ложится в кэш: останется одно нажатие «Обновить».
+                        updateStatus = if (UpdateChecker.isReady(context, apkUrl))
+                            "Установка доступна — нажмите «Обновить»"
+                        else
+                            "Скачиваю обновление в фоне…"
+                        UpdateChecker.prefetch(context, apkUrl, { s -> updateStatus = s }) { ok ->
+                            updateStatus =
+                                if (ok) "Готово — нажмите «Обновить»"
+                                else "Не удалось скачать, нажмите «Обновить»"
                         }
                     }
-                    // Повторная проверка каждые 20 минут: обновление «прилетает»,
-                    // пока приложение открыто, а не только при перезапуске.
-                    delay(20 * 60 * 1000L)
+                } catch (_: Exception) {
+                    // Ошибка проверки обновления не должна влиять на работу приложения
                 }
             }
 
@@ -225,7 +226,12 @@ class MainActivity : ComponentActivity() {
                             updateStatus = "Ошибка: отсутствует URL APK"
                         }
                     },
-                    onDismiss = { updateInfo = null },
+                    onDismiss = {
+                        // Запоминаем отказ: для этой версии диалог больше не появится.
+                        AppSettings.setUpdateDismissedCode(context, info.version_code)
+                        updateInfo = null
+                        updateStatus = null
+                    },
                 )
             }
             }
@@ -576,14 +582,18 @@ fun SourceChoiceDialog(match: Match, onChoice: (StreamUrl) -> Unit, onDismiss: (
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun UpdateDialog(info: AppVersionInfo, status: String?, onUpdate: () -> Unit, onDismiss: () -> Unit) {
-    // Авто-инициализация обновления если сервер принудительно требует апдейт
-    val autoTriggered = remember { androidx.compose.runtime.mutableStateOf(false) }
-    if (info.force_update && !autoTriggered.value) {
-        LaunchedEffect(Unit) {
-            onUpdate()
-            autoTriggered.value = true
-        }
+    // force_update здесь намеренно НЕ запускает установку автоматически:
+    // автовызов открывал системный установщик при каждом показе диалога,
+    // а отменённая установка на ТВ приводила к бесконечным «обновлениям».
+    val context = LocalContext.current
+    // Показываем реально установленную версию: без этого невозможно понять,
+    // прижилась ли OTA-установка или устройство до сих пор на старом билде.
+    val installedName = remember {
+        runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull() ?: "?"
     }
+    val installedCode = remember { UpdateChecker.currentVersionCode(context) }
     Dialog(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
@@ -602,6 +612,11 @@ fun UpdateDialog(info: AppVersionInfo, status: String?, onUpdate: () -> Unit, on
                 text = "Версия ${info.version}",
                 color = Theme.text,
                 fontSize = 16.sp,
+            )
+            Text(
+                text = "На устройстве: $installedName (код $installedCode)",
+                color = Theme.textMuted,
+                fontSize = 12.sp,
             )
             if (info.notes.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
