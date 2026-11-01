@@ -445,7 +445,9 @@ async def sync_win_nhl() -> None:
         snaps = {}
 
     changed_ids: list[int] = []
-    fallback_budget = 1
+    # несколько игр НХЛ идут одновременно — бюджет не должен обслужить
+    # только первую строку линии
+    fallback_budget = 3
     async with async_session() as db:
         # Мусор (реплеи/киберспорт) убираем двумя способами: по id из линии
         # (rejected) и по содержимому самой строки — id мог уже выйти из линии.
@@ -524,19 +526,30 @@ async def sync_win_nhl() -> None:
             home_score = snap.get("home_score")
             away_score = snap.get("away_score")
             period = _win_period(snap)
-            # Стрим ставим только когда WS подтвердил broadcast.url и плеер
-            # отдал источник — иначе карточка ведёт в пустой плеер.
+            # live — либо подтвердила линия 1win (serviceV2), либо уже
+            # официальный API: он переворачивает статус в момент вбрасывания
+            # шайбы, а serviceV2 в линии может отставать.
+            live_now = status == "live" or (
+                existing is not None and existing.status == "live"
+            )
+            # Стрим ставим только когда плеер реально отдал источник —
+            # иначе карточка ведёт в пустой плеер.
             stream: list[dict] | None = None
-            if status == "live":
+            if live_now:
                 if snap.get("broadcast"):
                     stream = await _win_stream(win_id, snap["broadcast"])
-                elif (
+                if not stream and (
                     fallback_budget > 0
                     and not (existing and existing.stream_urls)
                     and time.time() - _bc_fallback_at.get(win_id, 0.0) > 300.0
                 ):
-                    # WS в этом цикле не дал broadcast — одна одиночная попытка
-                    # (кэш _get_state не даёт долбить плеер чаще5 минут)
+                    # Прямой запрос плеера по broadcast.url для НХЛ нередко
+                    # отдаёт заглушку с таймером (IP хостинга в блок-листе) —
+                    # раньше такое «пусто» не доискивалось: откат шёл только
+                    # если broadcast не пришёл вовсе. Теперь добираем
+                    # состояние через пул PRIME-прокси — тот же путь, что и у
+                    # КХЛ в sync_win_extra; кэш _get_state не даёт долбить
+                    # WS и плеер чаще одного раза в 5 минут на матч.
                     _bc_fallback_at[win_id] = time.time()
                     fallback_budget -= 1
                     stream = await _win_stream(win_id)
