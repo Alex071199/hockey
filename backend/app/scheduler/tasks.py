@@ -1410,16 +1410,20 @@ async def refresh_live_stream_urls() -> None:
         *(_fetch(r.id, r.sp_match_id) for r in rows)
     )
 
+    # rows — кортежи (id, sp_match_id, stream_urls), а не объекты Match:
+    # результат _fetch несёт match_id (int), старые ссылки берём из map
+    old_urls = {r.id: (r.stream_urls or []) for r in rows}
+
     updates: list[tuple[int, list[dict], int | None, int | None]] = []
-    for row, detail in results:
+    for match_id, detail in results:
         if not detail or not detail.get("streams"):
             continue
         kept = [
-            s for s in (row.stream_urls or [])
+            s for s in old_urls.get(match_id, [])
             if s.get("source") not in SP_STREAM_SOURCES
         ]
         updates.append((
-            row.id,
+            match_id,
             list(detail["streams"]) + kept,
             detail.get("home_score"),
             detail.get("away_score"),
