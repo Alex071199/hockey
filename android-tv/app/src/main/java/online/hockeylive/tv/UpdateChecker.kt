@@ -60,7 +60,28 @@ object UpdateChecker {
      */
     fun isReady(context: Context, apkUrl: String): Boolean =
         AppSettings.downloadedApkUrl(context) == apkUrl &&
-            cachedFile(context).let { it.exists() && it.length() > 0 }
+            isValidApk(cachedFile(context), -1L)
+
+    /**
+     * Скачанный APK валиден: непустой zip (магия «PK») и — если сервер прислал
+     * Content-Length — размер совпадает с ним.
+     *
+     * Раньше проверялось только `length > 0`, поэтому обрезанная закачка
+     * (обрыв сети, сон ТВ) считалась готовой: установщик молча падал на
+     * битом файле, версия не росла и диалог обновления выскакивал снова
+     * и снова — «обновляюсь, а обновление всё равно требует».
+     */
+    private fun isValidApk(file: File, declaredLength: Long): Boolean {
+        if (!file.exists() || file.length() < 4) return false
+        if (declaredLength > 0 && file.length() != declaredLength) return false
+        val magic = ByteArray(2)
+        return try {
+            file.inputStream().use { it.read(magic) } == 2 &&
+                magic[0] == 'P'.code.toByte() && magic[1] == 'K'.code.toByte()
+        } catch (e: Exception) {
+            false
+        }
+    }
 
     private fun markReady(context: Context, apkUrl: String) {
         AppSettings.setDownloadedApkUrl(context, apkUrl)
@@ -117,6 +138,16 @@ object UpdateChecker {
                         }
                     }
                 }
+                if (!isValidApk(file, total)) {
+                    // битая закачка: сносим, чтобы isReady не выдавал её за готовую
+                    file.delete()
+                    AppSettings.setDownloadedApkUrl(context, null)
+                    main {
+                        onProgress("Скачанный файл повреждён — нажмите «Обновить» ещё раз")
+                        onDone(false)
+                    }
+                    return@Thread
+                }
                 markReady(context, apkUrl)
                 main {
                     onProgress("Готово — нажмите «Обновить»")
@@ -144,8 +175,15 @@ object UpdateChecker {
                     return@Thread
                 }
                 val file = cachedFile(context)
+                val total = resp.body?.contentLength() ?: -1L
                 resp.body?.byteStream()?.use { input ->
                     file.outputStream().use { output -> input.copyTo(output) }
+                }
+                if (!isValidApk(file, total)) {
+                    file.delete()
+                    AppSettings.setDownloadedApkUrl(context, null)
+                    main { onProgress("Скачанный файл повреждён — попробуйте ещё раз") }
+                    return@Thread
                 }
                 markReady(context, apkUrl)
                 main {

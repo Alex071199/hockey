@@ -58,7 +58,8 @@ object AppSettings {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY_UPDATE_APK_URL, null)
 
-    fun setDownloadedApkUrl(context: Context, url: String) {
+    /** null очищает отметку (например, закачка оказалась битой). */
+    fun setDownloadedApkUrl(context: Context, url: String?) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_UPDATE_APK_URL, url)
