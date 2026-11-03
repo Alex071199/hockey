@@ -170,8 +170,13 @@ async def yoomoney_webhook(
     if codepro == "true":
         return {"status": "ok"}
 
+    # amount — что зачислено на кошелёк (после комиссии ЮMoney, ~2% при
+    # оплате картой), withdraw_amount — что списали с плательщика.
+    # Пороги (50/100 ₽) сверяем с суммой оплаты, иначе платёж 50 ₽ картой
+    # (amount=48) отбрасывался и код в бота не приходил.
+    withdraw_amount = fields.get("withdraw_amount", "")
     try:
-        amount = int(float(amount_str))
+        amount = int(float(withdraw_amount or amount_str))
     except (ValueError, TypeError):
         amount = 0
 
