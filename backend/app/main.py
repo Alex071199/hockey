@@ -40,12 +40,30 @@ async def startup_scrape():
     await scrape_and_update()
 
 
+async def _notify_restart() -> None:
+    """Пишет админу в бота при каждом старте — чтобы не держать ПК включённым
+    в ожидании рестарта: бот сам сообщит, что сервер перезапустился."""
+    admin = (settings.TELEGRAM_ADMIN_CHAT_ID or "").strip()
+    if not admin:
+        return
+    try:
+        await asyncio.sleep(3)  # даём поллеру подняться
+        await telegram.send_message(
+            admin,
+            f"🔄 Сервер перезапущен: {datetime.utcnow().strftime('%d.%m %H:%M')} UTC\n\n"
+            "Если это после деплоя — новый код уже активен.",
+        )
+    except Exception as e:
+        logger.warning("restart notification failed: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     from app.api.tv_auth import migrate_legacy_store
 
     await migrate_legacy_store()
+    asyncio.create_task(_notify_restart())
     if settings.SCHEDULER_ENABLED:
         setup_scheduler()
         asyncio.create_task(startup_scrape())
