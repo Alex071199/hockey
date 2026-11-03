@@ -444,7 +444,8 @@ class PlayerActivity : ComponentActivity() {
         lifecycleScope.launch {
             val server = AppSettings.serverUrl(this@PlayerActivity)
             val stats = ApiClient.fetchMatchStats(
-                server, m.teamHome, m.teamAway, m.datetimeUtc.take(10), live = m.isLive,
+                server, m.teamHome, m.teamAway, m.datetimeUtc.take(10),
+                live = m.isLive, league = m.league,
             )
             if (!statsVisible) return@launch
             if (stats == null) {

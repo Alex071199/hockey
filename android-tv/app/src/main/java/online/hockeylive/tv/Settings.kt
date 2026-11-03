@@ -9,6 +9,7 @@ object AppSettings {
     private const val KEY_DEVICE = "device_id"
     private const val KEY_UPDATE_DISMISSED_CODE = "update_dismissed_version_code"
     private const val KEY_UPDATE_APK_URL = "update_downloaded_apk_url"
+    private const val KEY_SHOW_SCORES = "show_scores"
     const val DEFAULT_SERVER = "https://hockey-live.alwaysdata.net"
 
     /** Стабильный UUID устройства — для восстановления авторизации на сервере. */
@@ -50,6 +51,18 @@ object AppSettings {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
             .putInt(KEY_UPDATE_DISMISSED_CODE, versionCode)
+            .apply()
+    }
+
+    /** Положение кнопки «Показать/Скрыть счет» — переживает перезапуск приложения. */
+    fun showScores(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SHOW_SCORES, false)
+
+    fun setShowScores(context: Context, value: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_SHOW_SCORES, value)
             .apply()
     }
 

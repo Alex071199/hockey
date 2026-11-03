@@ -83,6 +83,13 @@ data class HighlightItem(
     @SerialName("embed_url") val embedUrl: String = "",
 )
 
+/** Обзор КХЛ: HLS-поток с KHL video (подписан и протухает — запрашиваем на лету). */
+@Serializable
+data class KhlHighlight(
+    @SerialName("m3u8_url") val m3u8Url: String? = null,
+    val name: String? = null,
+)
+
 @Serializable
 data class MatchStatsResponse(
     val match: StatsMatchInfo? = null,
@@ -92,4 +99,5 @@ data class MatchStatsResponse(
     val penalties: List<StatPenalty> = emptyList(),
     val rosters: StatsRosters? = null,
     val highlights: List<HighlightItem> = emptyList(),
+    val highlight: KhlHighlight? = null,
 )

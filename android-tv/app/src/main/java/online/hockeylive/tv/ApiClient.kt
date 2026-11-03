@@ -38,12 +38,19 @@ object ApiClient {
         away: String,
         date: String,
         live: Boolean = false,
+        league: String? = null,
+        eventId: Int? = null,
+        uid: String? = null,
     ): MatchStatsResponse? = withContext(Dispatchers.IO) {
         // Матч мог начаться в другой день по UTC — пробуем соседние даты
         val enc = { s: String -> java.net.URLEncoder.encode(s, "UTF-8") }
         for (d in dateVariants(date)) {
             var u = "${server.trimEnd('/')}/api/match-stats" +
                 "?home=${enc(home)}&away=${enc(away)}&date=$d"
+            // Без league сервер ищет матч в КХЛ — обзоры НХЛ тогда отдают 404
+            if (!league.isNullOrBlank()) u += "&league=${enc(league)}"
+            if (eventId != null && eventId > 0) u += "&event_id=$eventId"
+            if (!uid.isNullOrBlank()) u += "&uid=${enc(uid)}"
             if (live) u += "&live=true"
             val resp = runCatching {
                 http.newCall(Request.Builder().url(u).build()).execute()
@@ -65,6 +72,28 @@ object ApiClient {
             if (result != null) return@withContext result
         }
         null
+    }
+
+    /**
+     * Статистика/обзор конкретного матча из расписания.
+     * НХЛ — по uid NHL_<game id>, КХЛ из официального календаря — по event_id;
+     * если точный id не подошёл (расписание и календарь расходятся в
+     * написании названий), повторяем запрос поиском по паре команд.
+     */
+    suspend fun fetchMatchStatsFor(server: String, match: Match): MatchStatsResponse? {
+        val uid = match.matchUid?.takeIf { it.startsWith("NHL_") }
+        val eventId = if (match.matchUid?.startsWith("KHL_") == true) match.id.takeIf { it > 0 } else null
+        val date = match.datetimeUtc.take(10)
+        val exact = fetchMatchStats(
+            server, match.teamHome, match.teamAway, date,
+            live = false, league = match.league, eventId = eventId, uid = uid,
+        )
+        if (exact != null) return exact
+        if (uid == null && eventId == null) return null
+        return fetchMatchStats(
+            server, match.teamHome, match.teamAway, date,
+            live = false, league = match.league,
+        )
     }
 
     private fun dateVariants(date: String): List<String> {

@@ -109,8 +109,8 @@ class MainActivity : ComponentActivity() {
             var pendingMatch by remember { mutableStateOf<Match?>(null) }
             var updateInfo by remember { mutableStateOf<AppVersionInfo?>(null) }
             var updateStatus by remember { mutableStateOf<String?>(null) }
-            // Счёт по умолчанию скрыт при каждом открытии приложения (как спойлер на сайте)
-            var showScores by remember { mutableStateOf(false) }
+            // Положение кнопки «Показать/Скрыть счет» запоминается между запусками
+            var showScores by remember { mutableStateOf(AppSettings.showScores(context)) }
             val scope = rememberCoroutineScope()
 
             LaunchedEffect(Unit) {
@@ -160,25 +160,26 @@ class MainActivity : ComponentActivity() {
                 error = error,
                 loading = loading,
                 showScores = showScores,
-                onToggleScores = { showScores = !showScores },
+                onToggleScores = {
+                    showScores = !showScores
+                    AppSettings.setShowScores(context, showScores)
+                },
                 onMatchClick = { match ->
+                    // Прошедшие матчи КХЛ и НХЛ открываем всегда в обзор —
+                    // даже если у строки ещё остались источники трансляции.
+                    val wantOverview = match.status == "finished" &&
+                        (match.league.equals("NHL", true) || match.league.equals("KHL", true))
                     when {
-                        match.playableSources.size > 1 -> pendingMatch = match
-                        match.playableSources.size == 1 ->
-                            launchPlayer(context, match, match.playableSources.first())
-                        match.league.equals("NHL", true) && match.status == "finished" -> {
+                        wantOverview -> {
                             val m = match
+                            Toast.makeText(context, "Загружаю обзор…", Toast.LENGTH_SHORT).show()
                             scope.launch {
                                 val stats = runCatching {
-                                    ApiClient.fetchMatchStats(
-                                        AppSettings.serverUrl(context),
-                                        m.teamHome,
-                                        m.teamAway,
-                                        m.datetimeUtc.take(10),
-                                        live = false,
-                                    )
+                                    ApiClient.fetchMatchStatsFor(AppSettings.serverUrl(context), m)
                                 }.getOrNull()
+                                // НХЛ — ролик с nhl.com, КХЛ — HLS-поток с KHL video
                                 val hl = stats?.highlights?.firstOrNull()?.embedUrl
+                                    ?: stats?.highlight?.m3u8Url
                                 if (!hl.isNullOrBlank()) {
                                     context.startActivity(
                                         Intent(context, HighlightActivity::class.java)
@@ -189,6 +190,9 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
+                        match.playableSources.size > 1 -> pendingMatch = match
+                        match.playableSources.size == 1 ->
+                            launchPlayer(context, match, match.playableSources.first())
                         match.status == "finished" ->
                             Toast.makeText(context, "Нет доступных источников", Toast.LENGTH_SHORT).show()
                         else ->
@@ -777,7 +781,6 @@ fun HomeScreen(
             "calendar" -> CalendarSection(
                 matches = calendarMatches,
                 loading = calendarLoading,
-                showScores = showScores,
                 onMatchClick = onMatchClick,
             )
             "table" -> StandingsSection(
@@ -833,7 +836,6 @@ fun HeaderButton(label: String, selected: Boolean, onClick: () -> Unit) {
 fun CalendarSection(
     matches: List<Match>,
     loading: Boolean,
-    showScores: Boolean,
     onMatchClick: (Match) -> Unit,
 ) {
     if (loading) {
@@ -876,7 +878,7 @@ fun CalendarSection(
         for ((date, list) in grouped) {
             item(key = "day_$date") { CalendarDayHeader(date, today) }
             items(list, key = { "${it.league}|${it.matchUid ?: it.id}|${it.datetimeUtc}" }) { m ->
-                CalendarRow(match = m, showScores = showScores, onClick = { onMatchClick(m) })
+                CalendarRow(match = m, onClick = { onMatchClick(m) })
             }
         }
     }
@@ -908,7 +910,7 @@ fun CalendarDayHeader(date: java.time.LocalDate, today: java.time.LocalDate) {
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-fun CalendarRow(match: Match, showScores: Boolean, onClick: () -> Unit) {
+fun CalendarRow(match: Match, onClick: () -> Unit) {
     val time = runCatching {
         java.time.Instant.parse(match.datetimeUtc)
             .atZone(java.time.ZoneId.systemDefault())
@@ -950,7 +952,7 @@ fun CalendarRow(match: Match, showScores: Boolean, onClick: () -> Unit) {
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(12.dp))
-            CalendarCenter(match, showScores)
+            CalendarCenter(match)
             Spacer(Modifier.width(12.dp))
             Text(
                 text = match.teamAway,
@@ -967,8 +969,10 @@ fun CalendarRow(match: Match, showScores: Boolean, onClick: () -> Unit) {
     }
 }
 
+// На вкладке «Календарь» счёт виден всегда — независимо от кнопки
+// «Показать/Скрыть счет» (она действует только на главной).
 @Composable
-fun CalendarCenter(match: Match, showScores: Boolean) {
+fun CalendarCenter(match: Match) {
     when {
         match.isLive -> Row(verticalAlignment = Alignment.CenterVertically) {
             Text(text = "●", color = Theme.live, fontSize = 10.sp)
@@ -979,7 +983,7 @@ fun CalendarCenter(match: Match, showScores: Boolean) {
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
             )
-            if (showScores && match.displayScore.isNotEmpty()) {
+            if (match.displayScore.isNotEmpty()) {
                 Spacer(Modifier.width(8.dp))
                 Text(
                     text = match.displayScore,
@@ -990,17 +994,12 @@ fun CalendarCenter(match: Match, showScores: Boolean) {
             }
         }
         match.status == "finished" && match.displayScore.isNotEmpty() ->
-            if (showScores) {
-                Text(
-                    text = match.displayScore,
-                    color = Theme.textSecondary,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-            } else {
-                // счёт спрятан — показываем заглушку, как на сайте
-                Text(text = "vs", color = Theme.textMuted, fontSize = 14.sp)
-            }
+            Text(
+                text = match.displayScore,
+                color = Theme.textSecondary,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+            )
         else -> Text(text = "vs", color = Theme.textMuted, fontSize = 14.sp)
     }
 }
