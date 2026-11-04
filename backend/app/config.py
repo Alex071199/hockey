@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
@@ -56,6 +57,27 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def _env_file_value(key: str) -> str | None:
+    """Читает значение из .env рядом с приложением (вне зависимости от того,
+    задана ли переменная в окружении)."""
+    path = Path(__file__).resolve().parents[1] / ".env"
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith(key + "="):
+                return line.split("=", 1)[1].strip().strip("'\"")
+    except OSError:
+        return None
+    return None
+
+
+# Секрет ЮMoney: значение из .env имеет приоритет над окружением панели
+# хостинга — так его можно менять, когда панель недоступна (блокировка по IP).
+_override = _env_file_value("YOOMONEY_SECRET")
+if _override:
+    settings.YOOMONEY_SECRET = _override
 
 
 def _squash_ws(value: str) -> str:
