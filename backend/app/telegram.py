@@ -58,6 +58,16 @@ async def send_message(
 CONNECT_TV_BUTTON = "📺 Подключить ТВ"
 ISSUE_CODE_BUTTON = "🔑 Выдать код"
 DELETE_LAST_BUTTON = "🗑 Удалить последнюю рассылку"
+BROADCAST_BUTTON = "📣 Рассылка"
+# выбор аудитории рассылки
+BCAST_ALL_BUTTON = "👥 Всем — бот и сайт"
+BCAST_APP_BUTTON = "📱 Только владельцам приложения"
+BCAST_CANCEL_BUTTON = "❌ Отмена"
+BCAST_AUDIENCE_KEYBOARD = [
+    [BCAST_ALL_BUTTON],
+    [BCAST_APP_BUTTON],
+    [BCAST_CANCEL_BUTTON],
+]
 TV_MENU: list[list[str]] = [[CONNECT_TV_BUTTON]]
 
 # админ в состоянии ожидания chat_id для выдачи кода: chat_id -> ts
@@ -68,11 +78,22 @@ TVCODE_TTL = 300
 _delpending: dict[int, float] = {}
 DEL_TTL = 300
 
+# состояние рассылки: ждём текст (chat_id -> ts) и ждём выбор аудитории
+# (chat_id -> (текст, ts))
+_bcast_text_pending: dict[int, float] = {}
+_bcast_audience: dict[int, tuple[str, float]] = {}
+BCAST_TTL = 600
+
 
 def _menu(is_admin: bool) -> list[list[str]]:
-    """Главное меню: кнопки выдачи кода и удаления рассылки — только для админа."""
+    """Главное меню: кнопки выдачи кода, рассылки и удаления рассылки — только для админа."""
     if is_admin:
-        return [[CONNECT_TV_BUTTON], [ISSUE_CODE_BUTTON], [DELETE_LAST_BUTTON]]
+        return [
+            [CONNECT_TV_BUTTON],
+            [ISSUE_CODE_BUTTON],
+            [BROADCAST_BUTTON],
+            [DELETE_LAST_BUTTON],
+        ]
     return [list(TV_MENU[0])]
 
 
@@ -163,13 +184,30 @@ async def _save_news(text: str) -> int | None:
         return None
 
 
-async def broadcast(text: str) -> tuple[int, int]:
-    """Send text to all active subscribers. Returns (sent, failed)."""
-    # Всё, что видят все подписчики бота, попадает и на сайт (колокольчик)
+async def _app_recipients() -> list[str]:
+    """Чаты, которым когда-либо выдавался код активации ТВ (владельцы приложения)."""
+    from sqlalchemy import select
+
+    from app.database import async_session
+    from app.models import TvCode
+
+    async with async_session() as db:
+        res = await db.execute(select(TvCode.chat_id).distinct())
+        return [row[0] for row in res.all() if row[0]]
+
+
+async def broadcast(text: str, audience: str = "all") -> tuple[int, int]:
+    """Рассылка по выбранной аудитории. Returns (sent, failed).
+
+    audience="all" — все подписчики бота + новость в колокольчике на сайте
+    (текущее поведение: «всем, кто запустил бота и заходит на сайт»).
+    audience="app" — только те, кому выдавался код активации ТВ; на сайт
+    такая рассылка НЕ публикуется (новости приложения — владельцам приложения).
+    """
     from app.database import async_session
     from app.models import Broadcast, BroadcastDelivery
 
-    news_id = await _save_news(text)
+    news_id = await _save_news(text) if audience == "all" else None
     async with async_session() as db:
         bcast = Broadcast(news_id=news_id, text=text)
         db.add(bcast)
@@ -177,7 +215,9 @@ async def broadcast(text: str) -> tuple[int, int]:
         bcast_id = bcast.id
         await db.commit()
 
-    chat_ids = await _active_subscribers()
+    chat_ids = (
+        await _active_subscribers() if audience == "all" else await _app_recipients()
+    )
     sent = failed = 0
     deliveries: list[BroadcastDelivery] = []
     for cid in chat_ids:
@@ -196,7 +236,7 @@ async def broadcast(text: str) -> tuple[int, int]:
         async with async_session() as db:
             db.add_all(deliveries)
             await db.commit()
-    logger.info("Broadcast: sent=%d failed=%d", sent, failed)
+    logger.info("Broadcast(%s): sent=%d failed=%d", audience, sent, failed)
     return sent, failed
 
 
@@ -287,12 +327,34 @@ async def _handle_message(msg: dict) -> None:
         await send_message(chat_id, tv_payment_link(chat_id))
         return
 
+    # кнопка «📣 Рассылка» — запускаем выбор аудитории (только админ)
+    if text == BROADCAST_BUTTON:
+        if not is_admin:
+            await send_message(chat_id, "Команда доступна только администратору.")
+            return
+        _tvcode_pending.pop(chat_id, None)
+        _delpending.pop(chat_id, None)
+        _bcast_audience.pop(chat_id, None)
+        _bcast_text_pending[chat_id] = time.time()
+        await send_message(
+            chat_id,
+            "📣 Рассылка\n\n"
+            "Пришлите текст — затем выберите, кому он уйдёт:\n"
+            "• 👥 Всем — бот и сайт (всем, кто запустил бота, + колокольчик)\n"
+            "• 📱 Только владельцам приложения (кому выдавался код; на сайт не публикуется)\n\n"
+            "Отмена — /cancel",
+            keyboard=_menu(is_admin),
+        )
+        return
+
     # выдать код активации — только для админа
     if text == ISSUE_CODE_BUTTON:
         if not is_admin:
             await send_message(chat_id, "Команда доступна только администратору.")
             return
         _delpending.pop(chat_id, None)
+        _bcast_text_pending.pop(chat_id, None)
+        _bcast_audience.pop(chat_id, None)
         _tvcode_pending[chat_id] = time.time()
         await send_message(
             chat_id,
@@ -312,6 +374,8 @@ async def _handle_message(msg: dict) -> None:
             await send_message(chat_id, "Команда доступна только администратору.")
             return
         _tvcode_pending.pop(chat_id, None)
+        _bcast_text_pending.pop(chat_id, None)
+        _bcast_audience.pop(chat_id, None)
         from sqlalchemy import desc, select
 
         from app.database import async_session
@@ -342,6 +406,76 @@ async def _handle_message(msg: dict) -> None:
             "сообщения в течение 48 часов после отправки) и из колокольчика на сайте.\n\n"
             "Ответьте «да» для удаления. Отмена — /cancel",
             keyboard=_menu(is_admin),
+        )
+        return
+
+    # рассылка: админ прислал текст — теперь ждём выбор аудитории
+    if is_admin and chat_id in _bcast_audience:
+        stored, ts = _bcast_audience[chat_id]
+        if time.time() - ts > BCAST_TTL:
+            _bcast_audience.pop(chat_id, None)
+            await send_message(
+                chat_id, "⏱ Время истекло — напишите текст рассылки заново.",
+                keyboard=_menu(is_admin),
+            )
+            return
+        if (
+            cmd == "/cancel"
+            or text == BCAST_CANCEL_BUTTON
+            or text.lower() in ("отмена", "cancel")
+        ):
+            _bcast_audience.pop(chat_id, None)
+            await send_message(chat_id, "Отменено.", keyboard=_menu(is_admin))
+            return
+        audience: str | None = None
+        if text == BCAST_ALL_BUTTON:
+            audience = "all"
+        elif text == BCAST_APP_BUTTON:
+            audience = "app"
+        if audience is None:
+            await send_message(
+                chat_id,
+                "Выберите аудиторию кнопкой ниже.",
+                keyboard=BCAST_AUDIENCE_KEYBOARD,
+            )
+            return
+        _bcast_audience.pop(chat_id, None)
+        sent, failed = await broadcast(stored, audience=audience)
+        if audience == "app":
+            await send_message(
+                chat_id,
+                f"📤 Отправлено владельцам приложения: {sent}, ошибок: {failed}.\n"
+                "На сайт (колокольчик) не публиковалось.",
+                keyboard=_menu(is_admin),
+            )
+        else:
+            await send_message(
+                chat_id,
+                f"📤 Отправлено всем (бот + колокольчик на сайте): {sent}, "
+                f"ошибок: {failed}",
+                keyboard=_menu(is_admin),
+            )
+        return
+
+    # рассылка: админ нажал «📣 Рассылка» — ждём текст
+    if is_admin and chat_id in _bcast_text_pending:
+        if time.time() - _bcast_text_pending[chat_id] > BCAST_TTL:
+            _bcast_text_pending.pop(chat_id, None)
+            await send_message(
+                chat_id, "⏱ Время истекло — нажмите «📣 Рассылка» заново.",
+                keyboard=_menu(is_admin),
+            )
+            return
+        if cmd == "/cancel" or text.lower() in ("отмена", "cancel"):
+            _bcast_text_pending.pop(chat_id, None)
+            await send_message(chat_id, "Отменено.", keyboard=_menu(is_admin))
+            return
+        _bcast_text_pending.pop(chat_id, None)
+        _bcast_audience[chat_id] = (text, time.time())
+        await send_message(
+            chat_id,
+            "Кому отправить эту рассылку?",
+            keyboard=BCAST_AUDIENCE_KEYBOARD,
         )
         return
 
@@ -500,8 +634,11 @@ async def _handle_message(msg: dict) -> None:
             if not body:
                 await send_message(chat_id, "Использование: /news Текст новости")
                 return
-            sent, failed = await broadcast(body)
-            await send_message(chat_id, f"📤 Отправлено: {sent}, ошибок: {failed}")
+            _bcast_audience[chat_id] = (body, time.time())
+            await send_message(
+                chat_id, "Кому отправить эту рассылку?",
+                keyboard=BCAST_AUDIENCE_KEYBOARD,
+            )
             return
         await send_message(
             chat_id,
@@ -513,10 +650,21 @@ async def _handle_message(msg: dict) -> None:
         )
         return
 
-    # Admin can just type a message — it gets broadcast as news.
+    # Admin typed a message — offer to pick the audience before sending.
     if is_admin:
-        sent, failed = await broadcast(text)
-        await send_message(chat_id, f"📤 Отправлено: {sent}, ошибок: {failed}")
+        if text in (BCAST_ALL_BUTTON, BCAST_APP_BUTTON, BCAST_CANCEL_BUTTON):
+            # кнопки аудитории без активной рассылки (например, истёк TTL)
+            await send_message(
+                chat_id,
+                "Нет активной рассылки — нажмите «" + BROADCAST_BUTTON + "» "
+                "или просто пришлите текст.",
+                keyboard=_menu(is_admin),
+            )
+            return
+        _bcast_audience[chat_id] = (text, time.time())
+        await send_message(
+            chat_id, "Кому отправить эту рассылку?", keyboard=BCAST_AUDIENCE_KEYBOARD
+        )
         return
 
     await send_message(
