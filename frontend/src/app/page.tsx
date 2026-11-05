@@ -115,16 +115,10 @@ async function HeroSection() {
                   {parseMatchDate(liveMatch.datetime_utc).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
                 </div>
                 <Link
-                   href={`/${liveMatch.league.toLowerCase()}/match/${liveMatch.id}`}
+                  href="/download"
                   className="block w-full btn-red py-2.5 sm:py-3 rounded-xl text-xs sm:text-sm font-bold text-center"
                 >
-                  <span className="relative z-10">Смотреть</span>
-                </Link>
-                <Link
-                  href="/download"
-                  className="block text-center text-[11px] sm:text-xs text-hockey-text-secondary hover:text-white transition-colors mt-2"
-                >
-                  📱 Смотреть на ТВ в приложении →
+                  <span className="relative z-10">Смотреть на ТВ</span>
                 </Link>
               </div>
             </div>
