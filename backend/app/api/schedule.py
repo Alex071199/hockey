@@ -77,12 +77,14 @@ async def get_schedule(
     # Идущие матчи не пропадают из выдачи: поздние игры НХЛ (23:00+ UTC)
     # ещё идут после полуночи — строгое окно по дате их обрезало, из-за
     # чего на 1win была трансляция, а у нас матч не отображался.
-    query = select(Match).where(
-        or_(
-            and_(Match.datetime_utc >= start, Match.datetime_utc < end),
-            Match.status == "live",
-        )
-    )
+    # Исключение — когда окно запрошенного дня уже позади (прошедшая дата):
+    # тогда сегодняшние эфиры подмешивать нельзя, иначе на вчерашней дате
+    # показывались матчи сегодняшнего дня.
+    in_window = and_(Match.datetime_utc >= start, Match.datetime_utc < end)
+    if start <= now < end:
+        query = select(Match).where(or_(in_window, Match.status == "live"))
+    else:
+        query = select(Match).where(in_window)
 
     if league:
         query = query.where(Match.league == league.upper())
