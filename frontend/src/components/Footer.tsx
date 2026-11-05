@@ -93,7 +93,7 @@ export default function Footer() {
                 <img src="/vk-mono.svg" alt="VK" className="w-4 h-4 opacity-60 group-hover:opacity-100" />
               </a>
               <a
-                href="https://t.me/hockey_live27"
+                href="https://t.me/hockeylivenotificationbot"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-8 h-8 rounded-lg bg-hockey-card border border-hockey-border flex items-center justify-center hover:border-hockey-accent/40 hover:bg-hockey-accent/10 transition-all duration-200"
