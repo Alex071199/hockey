@@ -69,9 +69,14 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(startup_scrape())
     else:
         logger.info("SCHEDULER_ENABLED=false — только API, без фоновых джоб")
-    poll_task = asyncio.create_task(telegram.polling_task())
+    if settings.TELEGRAM_POLLING_ENABLED:
+        poll_task = asyncio.create_task(telegram.polling_task())
+    else:
+        poll_task = None
+        logger.info("TELEGRAM_POLLING_ENABLED=false — этот инстанс Telegram не опрашивает")
     yield
-    poll_task.cancel()
+    if poll_task is not None:
+        poll_task.cancel()
     if settings.SCHEDULER_ENABLED:
         scheduler.shutdown()
 

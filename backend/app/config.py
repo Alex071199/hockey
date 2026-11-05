@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     # False — приложение работает только как API (без фоновых джоб):
     # ставится на Render, когда синк едет на отдельном хосте (Railway).
     SCHEDULER_ENABLED: bool = True
+    # False — не опрашивать Telegram (long-polling). Нужно, когда бота
+    # обслуживает другой инстанс: два параллельных getUpdates дают 409.
+    TELEGRAM_POLLING_ENABLED: bool = True
     ONHOCKEY_BASE_URL: str = "https://www.onhockey.tv/"
     SCRAPER_INTERVAL_MINUTES: int = 5
     SCRAPER_LIVE_INTERVAL_MINUTES: int = 5
@@ -73,11 +76,15 @@ def _env_file_value(key: str) -> str | None:
     return None
 
 
-# Секрет ЮMoney: значение из .env имеет приоритет над окружением панели
-# хостинга — так его можно менять, когда панель недоступна (блокировка по IP).
-_override = _env_file_value("YOOMONEY_SECRET")
-if _override:
-    settings.YOOMONEY_SECRET = _override
+# Значения из .env имеют приоритет над окружением панели хостинга —
+# так их можно менять, когда панель недоступна (блокировка по IP).
+for _key in ("YOOMONEY_SECRET", "SCHEDULER_ENABLED", "TELEGRAM_POLLING_ENABLED"):
+    _override = _env_file_value(_key)
+    if _override:
+        if _key.endswith("_ENABLED"):
+            setattr(settings, _key, _override.strip().lower() in ("1", "true", "yes", "on"))
+        else:
+            setattr(settings, _key, _override)
 
 
 def _squash_ws(value: str) -> str:
