@@ -35,7 +35,7 @@ export default async function TvPayPage({
           Активация ТВ
         </h1>
         <p className="text-hockey-text-secondary text-sm sm:text-base mb-8">
-          Для работы приложения на телевизоре нужна активация — донат от 50 ₽ через ЮMoney.
+          Для работы приложения на телевизоре нужна активация — донат от 70 ₽ через ЮMoney.
           После оплаты бот пришлёт одноразовый 6-значный код.
         </p>
         {chatId ? (

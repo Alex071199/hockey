@@ -170,10 +170,10 @@ async def yoomoney_webhook(
     if codepro == "true":
         return {"status": "ok"}
 
-    # amount — что зачислено на кошелёк (после комиссии ЮMoney, ~2% при
+    # amount — что зачислено на кошелёк (после комиссии ЮMoney, ~2–4% при
     # оплате картой), withdraw_amount — что списали с плательщика.
-    # Пороги (50/100 ₽) сверяем с суммой оплаты, иначе платёж 50 ₽ картой
-    # (amount=48) отбрасывался и код в бота не приходил.
+    # Пороги (70 ₽ TV / 100 ₽ донат) сверяем с суммой оплаты, иначе платёж
+    # 70 ₽ картой (amount≈67) отбрасывался и код в бота не приходил.
     withdraw_amount = fields.get("withdraw_amount", "")
     try:
         amount = int(float(withdraw_amount or amount_str))
@@ -185,8 +185,15 @@ async def yoomoney_webhook(
     if label.startswith("tv_"):
         tv_parts = label.split("_", 2)
         tv_chat = tv_parts[1] if len(tv_parts) > 1 else ""
-        if amount < 50:
-            logger.warning("TV webhook: amount %d < 50 RUB, ignored", amount)
+        # MIN_AMOUNT (70 ₽) сверяем со списанной с плательщика суммой
+        # (withdraw_amount). Если поля нет — берём зачисленную с допуском
+        # на комиссию ЮMoney ~4% (67 ₽), иначе платёж 70 ₽ картой
+        # (amount≈67) отбрасывался и код в бота не приходил.
+        from app.api.tv_auth import MIN_AMOUNT
+
+        limit = MIN_AMOUNT if withdraw_amount else int(MIN_AMOUNT * 0.96)
+        if amount < limit:
+            logger.warning("TV webhook: amount %d < %d RUB, ignored", amount, limit)
             return {"status": "ok"}
         if not tv_chat:
             return {"status": "ok"}

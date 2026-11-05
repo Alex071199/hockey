@@ -1,4 +1,4 @@
-"""TV-активация: одноразовые 6-значные коды за донат от 50 ₽ (ЮMoney).
+"""TV-активация: одноразовые 6-значные коды за донат от 70 ₽ (ЮMoney).
 
 Схема:
 1. Пользователь в боте нажимает «Подключить ТВ» → получает ссылку на
@@ -34,7 +34,7 @@ router = APIRouter(prefix="/api", tags=["tv-auth"])
 
 # Старое файловое хранилище: при старте переносится в БД (если файл ещё есть)
 TV_CODES_FILE = Path(__file__).resolve().parents[2] / "tv_codes.json"
-MIN_AMOUNT = 50
+MIN_AMOUNT = 70
 
 _migrated = False
 _migrate_lock = asyncio.Lock()
