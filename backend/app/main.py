@@ -59,6 +59,23 @@ async def _notify_restart() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if settings.PROXY_TARGET:
+        # Режим reverse proxy: фоновые джобы и БД не нужны — только проброс
+        # запросов на быстрый инстанс и бот (он обслуживается здесь).
+        asyncio.create_task(_notify_restart())
+        poll_task = (
+            asyncio.create_task(telegram.polling_task())
+            if settings.TELEGRAM_POLLING_ENABLED
+            else None
+        )
+        logger.info("PROXY_TARGET=%s — режим reverse proxy", settings.PROXY_TARGET)
+        yield
+        if poll_task is not None:
+            poll_task.cancel()
+        from app import proxy_mode
+
+        await proxy_mode.aclose()
+        return
     await init_db()
     from app.api.tv_auth import migrate_legacy_store
 
@@ -94,6 +111,13 @@ app.add_middleware(
 from starlette.middleware.gzip import GZipMiddleware
 
 app.add_middleware(GZipMiddleware, minimum_size=500)
+
+# Режим reverse proxy: catch-all регистрируется ДО всех локальных маршрутов,
+# поэтому он перекрывает их и весь трафик уходит на PROXY_TARGET.
+if settings.PROXY_TARGET:
+    from app.proxy_mode import mount_proxy
+
+    mount_proxy(app, settings.PROXY_TARGET)
 
 from app.api.schedule import router as schedule_router
 from app.api.proxy import router as proxy_router

@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     YOOMONEY_WALLET: str = ""
     # Cloudflare Worker прокси (EU-регион) для обхода geo-блока 1win player
     PROXY_URL: str = ""
+    # Режим reverse proxy: если задан, экземпляр проксирует ВСЕ запросы на
+    # этот адрес (напр. Railway) вместо собственной обработки. Так хостинг
+    # без доступа к панели превращается в шлюз к быстрому инстансу.
+    PROXY_TARGET: str = ""
     # Пул обычных HTTP-прокси (через запятую, http://ip:port) для PRIME:
     # 1win режет IP дата-центров (Alwaysdata, Cloudflare) — «недоступно
     # в вашем регионе». Подпись HLS привязана к IP, поэтому для каждого
