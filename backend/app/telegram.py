@@ -185,15 +185,20 @@ async def _save_news(text: str) -> int | None:
 
 
 async def _app_recipients() -> list[str]:
-    """Чаты, которым когда-либо выдавался код активации ТВ (владельцы приложения)."""
+    """Чаты владельцев приложения: TvOwner (активировавшие код) ∪ TvCode
+    (получили код, но ещё не активировали)."""
     from sqlalchemy import select
 
     from app.database import async_session
-    from app.models import TvCode
+    from app.models import TvCode, TvOwner
 
     async with async_session() as db:
-        res = await db.execute(select(TvCode.chat_id).distinct())
-        return [row[0] for row in res.all() if row[0]]
+        owners = await db.execute(select(TvOwner.chat_id).distinct())
+        pending = await db.execute(select(TvCode.chat_id).distinct())
+        return sorted(
+            {row[0] for row in owners.all() if row[0]}
+            | {row[0] for row in pending.all() if row[0]}
+        )
 
 
 async def broadcast(text: str, audience: str = "all") -> tuple[int, int]:

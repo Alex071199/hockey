@@ -22,10 +22,11 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.config import settings
 from app.database import async_session
-from app.models import TvCode, TvDevice, TvPaymentOp
+from app.models import TvCode, TvDevice, TvOwner, TvPaymentOp
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,17 @@ async def consume_tv_code(code: str) -> bool:
     """Удалить код из БД после активации на ТВ. False — кода нет/использован."""
     await migrate_legacy_store()
     async with async_session() as db:
+        # фиксируем владельца до удаления — иначе после активации
+        # он пропал бы из аудитории рассылок владельцам приложения
+        res = await db.execute(
+            select(TvCode.chat_id).where(TvCode.code == code)
+        )
+        owner_chat_id = res.scalar()
+        if owner_chat_id:
+            await db.execute(
+                sqlite_insert(TvOwner).values(chat_id=str(owner_chat_id))
+                .on_conflict_do_nothing()
+            )
         res = await db.execute(delete(TvCode).where(TvCode.code == code))
         await db.commit()
         return bool(res.rowcount)

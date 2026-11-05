@@ -106,6 +106,19 @@ class TvCode(Base):
     created_at = Column(DateTime, default=func.now())
 
 
+class TvOwner(Base):
+    """Владельцы приложения: кому когда-либо выдавался код активации ТВ.
+
+    TvCode удаляется при активации, TvDevice не хранит chat_id — без этой
+    таблицы после активации владелец «исчезал» бы из аудитории рассылок.
+    """
+
+    __tablename__ = "tv_owners"
+
+    chat_id = Column(String, primary_key=True)
+    activated_at = Column(DateTime, default=func.now())
+
+
 class TvDevice(Base):
     """Активированные ТВ-устройства (восстановление после обновления)."""
 
