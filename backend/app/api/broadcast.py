@@ -633,6 +633,44 @@ async def debug_source(win_id: int):
             content, up_status = await _upstream_get(m3u8)
             out["upstream"] = {"status": up_status, "len": len(content),
                                "head": content[:100].decode("utf-8", "replace")}
+            # вариативный плейлист (playlist.m3u8) — именно с него
+            # начинаются сегменты; показываем, что на него отвечает origin
+            variant = next(
+                (ln.strip() for ln in content.decode("utf-8", "replace").splitlines()
+                 if ln.strip() and not ln.strip().startswith("#")),
+                None,
+            )
+            if variant:
+                vurl = _absolutize(variant, m3u8)
+                # повторные попытки: если origin отдаёт заглушку «на холодную»,
+                # реальный поток может появиться через несколько секунд
+                attempts = []
+                for k, delay in enumerate((0, 5, 10, 20)):
+                    if delay:
+                        await asyncio.sleep(delay - (attempts[-1]["sleep_to"] if attempts else 0))
+                    vcontent, vstatus = await _upstream_get(vurl)
+                    attempts.append({
+                        "n": k, "status": vstatus, "len": len(vcontent),
+                        "placeholder": _is_placeholder(vcontent),
+                        "sleep_to": delay,
+                        "head": vcontent[:300].decode("utf-8", "replace"),
+                    })
+                    if not _is_placeholder(vcontent) and vcontent.startswith(b"#EXTM3U"):
+                        # и первый сегмент тоже — полная проверка цепочки
+                        seg = next(
+                            (ln.strip() for ln in vcontent.decode("utf-8", "replace").splitlines()
+                             if ln.strip() and not ln.strip().startswith("#")),
+                            None,
+                        )
+                        if seg:
+                            scontent, sstatus = await _upstream_get(
+                                _absolutize(seg, vurl))
+                            attempts[-1]["segment"] = {
+                                "status": sstatus, "len": len(scontent),
+                                "placeholder": _is_placeholder(scontent),
+                            }
+                        break
+                out["variant"] = {"url": vurl[:160], "attempts": attempts}
     return out
 
 
