@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { Fragment, useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { parseMatchDate } from "@/lib/parse-date";
@@ -440,17 +440,29 @@ export default function MatchPage() {
             {sortedStreams.length > 0 && (
               <div className="flex flex-nowrap gap-2 mb-3 sm:mb-4 overflow-x-auto pb-1 scrollbar-hide">
                 {sortedStreams.map((s, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setSelectedStream(s)}
-                    className={`shrink-0 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 ${
-                      selectedStream?.url === s.url
-                        ? "bg-hockey-accent text-white shadow-lg shadow-hockey-accent/20"
-                        : "bg-hockey-card border border-hockey-border text-hockey-text-secondary hover:text-white hover:border-hockey-border-light"
-                    }`}
-                  >
-                    {streamButtonLabel(s, i)}
-                  </button>
+                  <Fragment key={i}>
+                    <button
+                      onClick={() => setSelectedStream(s)}
+                      className={`shrink-0 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all duration-200 ${
+                        selectedStream?.url === s.url
+                          ? "bg-hockey-accent text-white shadow-lg shadow-hockey-accent/20"
+                          : "bg-hockey-card border border-hockey-border text-hockey-text-secondary hover:text-white hover:border-hockey-border-light"
+                      }`}
+                    >
+                      {streamButtonLabel(s, i)}
+                    </button>
+                    {/* второй кнопкой — всегда «Смотреть на ТВ», но только
+                        при наличии источника; в ТВ-приложении не показывается
+                        (страницы сайта там не открываются) */}
+                    {i === 0 && (
+                      <Link
+                        href="/download"
+                        className="shrink-0 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-semibold bg-hockey-card border border-hockey-border text-hockey-text-secondary hover:text-white hover:border-hockey-border-light transition-all duration-200"
+                      >
+                        Смотреть на ТВ
+                      </Link>
+                    )}
+                  </Fragment>
                 ))}
               </div>
             )}

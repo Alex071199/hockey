@@ -120,6 +120,12 @@ async function HeroSection() {
                 >
                   <span className="relative z-10">Смотреть</span>
                 </Link>
+                <Link
+                  href="/download"
+                  className="block text-center text-[11px] sm:text-xs text-hockey-text-secondary hover:text-white transition-colors mt-2"
+                >
+                  📱 Смотреть на ТВ в приложении →
+                </Link>
               </div>
             </div>
           ) : nextKhl ? (
@@ -148,10 +154,10 @@ async function HeroSection() {
                   {nextKhl.time} МСК &middot; {new Date(nextKhl.date + "T00:00:00").toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}
                 </div>
                 <Link
-                  href="/schedule"
+                  href="/download"
                   className="block w-full btn-red py-2.5 sm:py-3 rounded-xl text-xs sm:text-sm font-bold text-center"
                 >
-                  <span className="relative z-10">Календарь</span>
+                  <span className="relative z-10">Смотреть на ТВ</span>
                 </Link>
               </div>
             </div>
