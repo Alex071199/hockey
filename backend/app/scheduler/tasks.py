@@ -1,4 +1,5 @@
 import asyncio
+import difflib
 import logging
 import random
 import re
@@ -324,6 +325,41 @@ def _pair_key(home: str | None, away: str | None) -> tuple[str, str]:
     return ((home or "").casefold().strip(), (away or "").casefold().strip())
 
 
+# Порог «это один и тот же клуб под разными написаниями»: реальные варианты
+# («Сейбрз»/«Сейбрс», «Флэймз»/«Флеймс», «Уайлд»/«Вайлд») дают 0.89–0.95,
+# максимум для РАЗНЫХ клубов — 0.83 («Нью-Йорк Айлендерс»/«Рейнджерс»).
+_NHL_NAME_SIM = 0.86
+
+
+def _norm_nhl_name(name: str | None) -> str:
+    """Нормализация названия клуба НХЛ.
+
+    1win и официальный API пишут клубы по-своему и меняют транслитерацию
+    от линии к линии («Баффало Сейбрс» против «Баффало Сейбрз») — без этого
+    один и тот же матч не находился парой и дублировался в календаре.
+    """
+    s = (name or "").casefold().replace("ё", "е").replace("э", "е")
+    return re.sub(r"[\s\-]+", " ", s).strip()
+
+
+def _nhl_name_match(a: str | None, b: str | None) -> bool:
+    """Один клуб под двумя написаниями (см. _NHL_NAME_SIM)."""
+    x, y = _norm_nhl_name(a), _norm_nhl_name(b)
+    if not x or not y:
+        return False
+    if x == y:
+        return True
+    return difflib.SequenceMatcher(None, x, y).ratio() >= _NHL_NAME_SIM
+
+
+def _nhl_pair_match(
+    home1: str | None, away1: str | None,
+    home2: str | None, away2: str | None,
+) -> bool:
+    """Тот же матч: обе команды совпадают с точностью до написания."""
+    return _nhl_name_match(home1, home2) and _nhl_name_match(away1, away2)
+
+
 def _win_id_of(row: Match) -> int:
     """WIN-id строки 1win; у строк официального API (NHL_) id — не её."""
     uid = row.match_uid or ""
@@ -352,6 +388,23 @@ def _find_nhl_twin(rows: list[Match], dt: datetime | None) -> Match | None:
         ):
             best = r
     return best
+
+
+def _find_nhl_twin_fuzzy(
+    rows: list[Match], home: str | None, away: str | None, dt: datetime | None
+) -> Match | None:
+    """Близнец матча среди строк с ДРУГИМ написанием клубов.
+
+    Точный ключ пары (_pair_key) такие строки в группу не складывает,
+    поэтому написания сравниваем отдельно («Баффало Сейбрз» = «Сейбрс»).
+    """
+    return _find_nhl_twin(
+        [
+            r for r in rows
+            if _nhl_pair_match(home, away, r.team_home, r.team_away)
+        ],
+        dt,
+    )
 
 
 # одиночные попытки дозапроса broadcast, когда WS в цикле не дал ссылки
@@ -499,6 +552,13 @@ async def sync_win_nhl() -> None:
                 # игра могла перевыпуститься в линии под новым WIN-id — тогда
                 # обновляем старую строку, а не создаём вторую (будет дубль)
                 twin = _find_nhl_twin(pair_index.get(_pair_key(home, away), []), dt)
+                if twin is None:
+                    # 1win мог записать клуб иначе, чем API («Сейбрз»/«Сейбрс»):
+                    # точный ключ не совпал — ищем близнеца по написанию
+                    twin = _find_nhl_twin_fuzzy(
+                        [r for r in nhl_rows if r.id not in junk_ids],
+                        home, away, dt,
+                    )
                 if twin is not None:
                     if (twin.match_uid or "").startswith("NHL_"):
                         # строку ведёт официальный API: uid не переименовываем,
@@ -623,33 +683,45 @@ async def _merge_nhl_duplicates(
     """Сливает накопившиеся дубли строк НХЛ одной игры.
 
     Одна игра могла быть в линии под разными WIN-id (переиздание карточки):
-    на один id пришла строка со стримом, на другой — без. Канон — строка
-    официального API (NHL_), иначе строка из текущей линии (она продолжает
-    получать обновления), её и оставляем.
+    на один id пришла строка со стримом, на другой — без. Дубли ловятся и
+    когда клубы записаны по-разному («Баффало Сейбрс» у 1win против
+    «Баффало Сейбрз» в API) — такое писалось раньше точного ключа пары.
+    Канон — строка официального API (NHL_), иначе строка из текущей линии
+    (она продолжает получать обновления), её и оставляем.
     """
     rows = (
         (await db.execute(select(Match).where(Match.league == "NHL")))
         .scalars()
         .all()
     )
-    groups: dict[tuple[str, str], list[Match]] = {}
-    for r in rows:
-        if not r.datetime_utc:
-            continue
-        groups.setdefault(_pair_key(r.team_home, r.team_away), []).append(r)
+    # Кластеры «одна игра»: точный ключ пары не годится — 1win пишет клубы
+    # иначе, чем API («Баффало Сейбрс» против «Баффало Сейбрз»), поэтому
+    # склеиваем по близкому времени старта и похожим названиям обеих команд.
+    # Мусор (реплеи/киберспорт) в кластеры не берём — его удаляет вызывающий.
+    clusters: list[list[Match]] = []
+    for r in sorted(
+        (
+            r for r in rows
+            if r.datetime_utc
+            and _is_regular_nhl_row(r.team_home or "", r.team_away or "")
+        ),
+        key=lambda r: r.datetime_utc,
+    ):
+        for cluster in clusters:
+            head = cluster[-1]
+            if (
+                r.datetime_utc - head.datetime_utc <= timedelta(hours=6)
+                and _nhl_pair_match(
+                    r.team_home, r.team_away, head.team_home, head.team_away
+                )
+            ):
+                cluster.append(r)
+                break
+        else:
+            clusters.append([r])
 
     merged = 0
-    for arr in groups.values():
-        if len(arr) < 2:
-            continue
-        arr.sort(key=lambda r: r.datetime_utc)
-        cluster = [arr[0]]
-        for r in arr[1:]:
-            if (r.datetime_utc - cluster[-1].datetime_utc) <= timedelta(hours=6):
-                cluster.append(r)
-                continue
-            merged += await _merge_nhl_cluster(db, cluster, line_ids, changed_ids)
-            cluster = [r]
+    for cluster in clusters:
         merged += await _merge_nhl_cluster(db, cluster, line_ids, changed_ids)
     return merged
 
@@ -1818,6 +1890,19 @@ async def sync_nhl_schedule() -> None:
                 twin = _find_nhl_twin(
                     pair_index.get(_pair_key(home, away), []), dt
                 )
+                if twin is None:
+                    # 1win записал клуб иначе, чем наш API-словарь —
+                    # иначе строка создастся второй раз (дубль в календаре);
+                    # мусор (реплеи/киберспорт) близнецом быть не может
+                    twin = _find_nhl_twin_fuzzy(
+                        [
+                            r for r in rows
+                            if _is_regular_nhl_row(
+                                r.team_home or "", r.team_away or ""
+                            )
+                        ],
+                        home, away, dt,
+                    )
                 if twin is not None:
                     logger.info(
                         "NHL: %s - %s найден в API: %s -> %s, переименовываем",
